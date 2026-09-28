@@ -46,7 +46,8 @@ BabaBot Market Radar
 | 6 | PLANNED | Meme / explosion hunter discovery |
 | 7 | PLANNED | Qualified wallet registry |
 | 8 | PLANNED | Live wallet monitor |
-| 8.5 | PLANNED | Vercel dashboard / UI |\n| 9 | PLANNED | Smart-money signal + MCD integration |
+| 8.5 | PLANNED | Vercel dashboard / UI |
+| 9 | PLANNED | Smart-money signal + MCD integration |
 | 10 | PLANNED | Validation + ML optimization |
 
 ## Stage 1 frozen principles
