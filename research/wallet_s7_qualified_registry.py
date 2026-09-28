@@ -7,6 +7,9 @@ from typing import Any, Iterable
 from research.wallet_s1_data_foundation import validate_solana_address
 
 STAGE7_VERSION = "wallet-s7-v1"
+STAGE4_VERSION = "wallet-s4-v1"
+STAGE5_VERSION = "wallet-s5-v1"
+STAGE6_VERSION = "wallet-s6-v1"
 CHAIN = "solana"
 
 
@@ -21,6 +24,39 @@ def _canonical_json(value: Any) -> str:
 
 def _fingerprint(value: Any) -> str:
     return hashlib.sha256(_canonical_json(value).encode("utf-8")).hexdigest()
+
+
+def _validate_source_version(
+    source: dict[str, Any] | None,
+    expected_version: str,
+    source_name: str,
+) -> None:
+    if source is None:
+        return
+    actual = str(source.get("version") or "")
+    if actual != expected_version:
+        raise ValueError(
+            f"unsupported {source_name} version: {actual!r}; "
+            f"expected {expected_version!r}"
+        )
+
+
+def _verify_record_fingerprint(row: dict[str, Any]) -> None:
+    actual = str(row.get("record_fingerprint") or "")
+    if not actual:
+        raise ValueError(
+            f"registry record missing fingerprint for {row.get('wallet')}"
+        )
+    core = {
+        key: value
+        for key, value in row.items()
+        if key != "record_fingerprint"
+    }
+    expected = _fingerprint(core)
+    if actual != expected:
+        raise ValueError(
+            f"registry record fingerprint mismatch for {row.get('wallet')}"
+        )
 
 
 def _wallet_of(value: dict[str, Any] | None) -> str | None:
@@ -198,6 +234,26 @@ def build_registry_record(
     from Stage 5 classification.
     """
     wallet = validate_solana_address(wallet)
+    _validate_source_version(
+        performance,
+        STAGE4_VERSION,
+        "Stage 4 performance",
+    )
+    _validate_source_version(
+        classification,
+        STAGE5_VERSION,
+        "Stage 5 classification",
+    )
+    _validate_source_version(
+        meme_profile,
+        STAGE6_VERSION,
+        "Stage 6 meme profile",
+    )
+    _validate_source_version(
+        explosion_profile,
+        STAGE6_VERSION,
+        "Stage 6 explosion profile",
+    )
     _validate_same_wallet(
         wallet,
         performance=performance,
@@ -215,6 +271,13 @@ def build_registry_record(
     )
     primary_segment = classification.get("primary_segment")
 
+    if live_eligible and (
+        performance is None
+        or not bool(performance.get("performance_available"))
+    ):
+        raise ValueError(
+            "qualified wallet requires an available Stage 4 performance source"
+        )
     if live_eligible and not qualifying_segments:
         raise ValueError(
             "qualified wallet has no qualifying Stage 5 segments"
@@ -297,10 +360,7 @@ def build_registry_snapshot(
             raise ValueError(
                 f"unsupported registry record version for {wallet}"
             )
-        if not row.get("record_fingerprint"):
-            raise ValueError(
-                f"registry record missing fingerprint for {wallet}"
-            )
+        _verify_record_fingerprint(row)
         by_wallet[wallet] = row
 
     ordered = [by_wallet[wallet] for wallet in sorted(by_wallet)]
@@ -350,6 +410,7 @@ def upsert_registry_records(
         wallet = validate_solana_address(str(row.get("wallet") or ""))
         if str(row.get("version") or "") != STAGE7_VERSION:
             raise ValueError(f"unsupported registry record version for {wallet}")
+        _verify_record_fingerprint(row)
         merged[wallet] = row
 
     return [merged[wallet] for wallet in sorted(merged)]
