@@ -44,8 +44,8 @@ BabaBot Market Radar
 | 4 | PASS | Historical wallet performance engine |
 | 5 | PASS | S1 / S2 / S3 classification |
 | 6 | PASS | Meme / explosion hunter discovery |
-| 7 | NEXT | Qualified wallet registry |
-| 8 | PLANNED | Live wallet monitor |
+| 7 | PASS | Qualified wallet registry |
+| 8 | NEXT | Live wallet monitor |
 | 8.5 | PLANNED | Vercel dashboard / UI |
 | 9 | PLANNED | Smart-money signal + MCD integration |
 | 10 | PLANNED | Validation + ML optimization |
@@ -87,7 +87,10 @@ docs/
 ├── WALLET_STAGE5_CLASSIFICATION_Status.txt
 ├── WALLET_STAGE6_MEME_EXPLOSION_HUNTER_Preregistration.md
 ├── WALLET_STAGE6_MEME_EXPLOSION_HUNTER_Result.md
-└── WALLET_STAGE6_MEME_EXPLOSION_HUNTER_Status.txt
+├── WALLET_STAGE6_MEME_EXPLOSION_HUNTER_Status.txt
+├── WALLET_STAGE7_QUALIFIED_WALLET_REGISTRY_Preregistration.md
+├── WALLET_STAGE7_QUALIFIED_WALLET_REGISTRY_Result.md
+└── WALLET_STAGE7_QUALIFIED_WALLET_REGISTRY_Status.txt
 
 research/
 ├── __init__.py
@@ -97,7 +100,8 @@ research/
 ├── wallet_s3_position_reconstruction.py
 ├── wallet_s4_historical_performance.py
 ├── wallet_s5_classification.py
-└── wallet_s6_meme_explosion_hunter.py
+├── wallet_s6_meme_explosion_hunter.py
+└── wallet_s7_qualified_registry.py
 
 tests/
 ├── __init__.py
@@ -106,10 +110,11 @@ tests/
 ├── test_wallet_s3_position_reconstruction.py
 ├── test_wallet_s4_historical_performance.py
 ├── test_wallet_s5_classification.py
-└── test_wallet_s6_meme_explosion_hunter.py
+├── test_wallet_s6_meme_explosion_hunter.py
+└── test_wallet_s7_qualified_registry.py
 ```
 
-## Run deterministic Stage 1–6 tests
+## Run deterministic Stage 1–7 tests
 
 ```bash
 python -m unittest discover -s tests -v
@@ -133,5 +138,6 @@ WALLET_STAGE3_POSITION_TRADE_RECONSTRUCTION = PASS
 WALLET_STAGE4_HISTORICAL_PERFORMANCE_ENGINE = PASS
 WALLET_STAGE5_CLASSIFICATION_V1 = PASS
 WALLET_STAGE6_MEME_EXPLOSION_HUNTER = PASS
-NEXT = WALLET_STAGE7_QUALIFIED_WALLET_REGISTRY
+WALLET_STAGE7_QUALIFIED_WALLET_REGISTRY = PASS
+NEXT = WALLET_STAGE8_LIVE_WALLET_MONITOR
 ```
