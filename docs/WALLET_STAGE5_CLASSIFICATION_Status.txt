@@ -1,0 +1,13 @@
+WALLET_STAGE5_CLASSIFICATION_V1_PASS
+stage1_tests=5/5
+stage2_tests=9/9
+stage3_tests=11/11
+stage4_tests=13/13
+stage5_tests=12/12
+tests_cumulative=50/50
+classifier=rules_only
+weighted_score=none
+drawdown_gate=deferred_until_empirical
+meme_hunter=stage6
+whale=deferred_until_capital_data
+next=WALLET_STAGE6_MEME_EXPLOSION_HUNTER
