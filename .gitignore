@@ -5,3 +5,4 @@ __pycache__/
 .env.*
 wallet_probe.json
 *.log
+node_modules/\n.next/\n.vercel/\n*.tsbuildinfo\n
