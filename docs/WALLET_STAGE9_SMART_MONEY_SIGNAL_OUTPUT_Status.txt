@@ -1,0 +1,16 @@
+WALLET_STAGE9_SMART_MONEY_SIGNAL_OUTPUT_PASS
+stage9_tests=24/24
+stage8_specialty_handoff_test=1/1
+python_tests_cumulative=139/139
+signal_states=ACCUMULATION,DISTRIBUTION,NEUTRAL
+state_basis=freshest_active_window_5m_then_15m_then_1h
+freshness=exact_age_plus_window_bucket
+rolling_window_agreement=separate_from_temporal_persistence
+temporal_bands=0_5m,5_15m,15_60m
+usd_coverage=COMPLETE,PARTIAL,UNAVAILABLE
+meme_hunter_policy=EVIDENCE_ONLY_STAGE6_V1
+registry_provenance=EVENT_TIME_QUALIFICATION_PROVENANCE
+strength_score=NONE
+entry_rule=NONE
+external_handoff=DETERMINISTIC_JSON
+next=WALLET_STAGE10_WALLET_ONLY_PAPER_TRADING
