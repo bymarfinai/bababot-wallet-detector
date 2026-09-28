@@ -27,7 +27,7 @@ Trade / Position Reconstruction
         ↓
 Wallet Performance Engine
         ↓
-S1 / S2 / S3 + Specialty Evidence
+Performance Tier + Specialty + Capital Labels
         ↓
 Qualified Wallet Registry
         ↓
@@ -64,14 +64,14 @@ No consumer is required for Wallet Detector itself to work.
 | 2 | PASS | Transaction normalization |
 | 3 | PASS | Position / trade reconstruction |
 | 4 | PASS | Historical wallet performance engine |
-| 5 | PASS | S1 / S2 / S3 classification |
-| 6 | PASS | Meme / explosion hunter discovery |
+| 5 | PASS V1 | S1 / S2 / S3 classification currently implemented |
+| 6 | PASS V1 | Meme / explosion hunter evidence |
 | 7 | PASS | Qualified wallet registry |
 | 8 | PASS CORE | Live wallet monitor core |
 | 8.5 | PASS | Vercel dashboard / UI |
 | 9 | NEXT | Smart-money signal output layer |
 | 10 | PLANNED | Wallet-only paper trading |
-| 11 | PLANNED | Validation + rule optimization |
+| 11 | PLANNED | Validation + rule optimization + S4/S5 calibration |
 | 12 | PLANNED | Optional ML ranker / probability layer |
 
 MCD integration is **not** a required development stage.
@@ -88,7 +88,30 @@ MCD integration is **not** a required development stage.
 - Provider-specific logic stays behind an adapter boundary
 - No API key or trading credential is committed
 
-## Frozen V1 wallet classification
+## Wallet taxonomy
+
+A wallet is described using **three independent dimensions**:
+
+```text
+1. PERFORMANCE TIER
+   S1 / S2 / S3 / S4 / S5
+
+2. SPECIALTY
+   Meme Hunter / None
+
+3. CAPITAL
+   Normal / Large / Whale
+```
+
+These dimensions must not be collapsed into one score.
+
+A high-capital wallet is not automatically smart money, and a Meme Hunter does not automatically need to be a high performance-tier wallet.
+
+## Performance tiers
+
+Performance tiers describe **consistent net realized return per reconstructed trade episode**.
+
+Target taxonomy:
 
 ### S1 — Consistent
 
@@ -115,29 +138,179 @@ net median ROI >= +10% per trade
 net total realized PnL > 0
 ```
 
+### S4 — Elite Return
+
+```text
+clean closed trades >= 50
+net median ROI >= +20% per trade
+net total realized PnL > 0
+```
+
+### S5 — Extreme Return
+
+```text
+clean closed trades >= 50
+net median ROI >= +50% per trade
+net total realized PnL > 0
+```
+
+S1 keeps the frozen V1 win-rate gate of >=60%.
+
+No extra S2/S3/S4/S5 win-rate threshold should be invented before empirical validation.
+
+Tier membership is cumulative by threshold:
+
+```text
+median net ROI = +24%
+
+S1 PASS
+S2 PASS
+S3 PASS
+S4 PASS
+S5 FAIL
+
+primary performance tier = S4
+```
+
 Median net realized ROI is intentionally preferred over arithmetic mean so a small number of jackpot trades cannot dominate qualification.
 
 Holding time, profit factor, drawdown, activity consistency, and sample size remain recorded as validation features.
+
+### Current implementation status
+
+Stage 5 code currently implements **S1 / S2 / S3 only**.
+
+S4 / S5 are now part of the target taxonomy, but should be added to production classification only with tests and downstream registry/dashboard updates. The documentation must not claim S4/S5 are already live before that code change is completed.
 
 ## Specialty labels
 
 ### Meme / Explosion Hunter
 
-Stage 6 is an orthogonal specialty detector.
+Meme Hunter is an **orthogonal specialty detector**, not an extension of S1-S5.
 
-Current historical evidence includes:
+Its purpose is specifically to identify wallets that repeatedly enter before potential **SHIB / PEPE / BONK-style monster runners**.
+
+The minimum meaningful explosion is:
 
 ```text
-2x / 5x / 10x
-within
-6H / 24H / 72H
+>= 2x from the wallet-relevant entry reference
 ```
 
-and explosion-event lead-time analysis.
+**2x is the minimum qualifying explosion, not the final target.**
 
-The specialty label must remain conceptually independent from S1 / S2 / S3.
+Explosion capability buckets:
 
-Current Stage-7 V1 still inherits live eligibility strictly from Stage-5 qualification. This is a known design limitation, not a final statement that a validated Meme Hunter specialist must also pass S1/S2/S3.
+```text
+E1  >= 2x
+E2  >= 5x
+E3  >= 10x
+E4  >= 20x
+E5  >= 50x
+E6  >= 100x
+```
+
+These are event/run capability buckets, **not wallet median-return tiers**.
+
+Example:
+
+```text
+Wallet A
+
+Performance Tier      S2
+Median net ROI        +6.3%
+
+Meme Hunter           YES
+>=2x captured         21 events
+>=5x captured          9 events
+>=10x captured         4 events
+>=20x captured         2 events
+>=50x captured         1 event
+
+Highest Explosion     E5
+Best Runner           73.4x
+```
+
+A wallet can therefore be:
+
+```text
+S2 + Meme Hunter + Large
+S4 + None + Whale
+S1 + Meme Hunter + Normal
+```
+
+without mixing the meanings of performance, specialty, and capital.
+
+### Continuous runner measurement
+
+Do not store only discrete buckets.
+
+For every eligible wallet BUY / explosion event, preserve the actual observed maximum multiple where data coverage permits.
+
+Example:
+
+```text
+entry price      0.000001
+future peak      0.000083
+max_multiple     83x
+
+>=2x    YES
+>=5x    YES
+>=10x   YES
+>=20x   YES
+>=50x   YES
+>=100x  NO
+```
+
+This retains information needed for later validation and ML instead of reducing an 83x runner to a generic 50x bucket.
+
+### Meme Hunter evaluation horizons
+
+Short-horizon explosion evidence remains useful:
+
+```text
+6H
+24H
+72H
+```
+
+For monster-runner discovery, also evaluate longer horizons:
+
+```text
+7D
+30D
+```
+
+This allows separation between:
+
+```text
+FAST EXPLOSION
+>=2x within 6H–72H
+
+MEGA RUNNER
+large multi-x expansion developing over 7D–30D
+```
+
+### Meme Hunter quality metrics
+
+A future calibrated Meme Hunter label should consider:
+
+```text
+>=2x hit rate
+>=5x / >=10x / >=20x / >=50x / >=100x capture rate
+actual max multiple distribution
+distinct explosive tokens captured
+repeatability across independent events
+median entry lead time
+false-positive rate
+eligible buy count
+data-coverage completeness
+```
+
+Repeated buys of the same token must not artificially inflate distinct-token success.
+
+The specialty label must remain conceptually independent from S1-S5.
+
+Current Stage-7 V1 still inherits live eligibility strictly from Stage-5 qualification. This is a known design limitation, not a final statement that a validated Meme Hunter specialist must also pass a normal performance tier.
 
 A standalone Meme Hunter live-eligibility rule should only be frozen after empirical population calibration.
 
@@ -156,8 +329,9 @@ Inputs may include:
 ```text
 unique qualified BUY wallets
 unique qualified SELL wallets
-S1 / S2 / S3 participation
+S1 / S2 / S3 / S4 / S5 participation
 Meme Hunter participation
+Meme Hunter explosion evidence
 net base flow
 validated USD net flow when available
 freshness
@@ -218,8 +392,9 @@ signal time
 entry time
 entry price
 qualified-wallet count
-S1 / S2 / S3 counts
+S1 / S2 / S3 / S4 / S5 counts
 Meme Hunter participation
+Meme Hunter historical explosion profile
 BUY / SELL wallet counts
 net flow
 TP / SL
@@ -243,7 +418,7 @@ Candidate rule variants should be compared empirically, for example:
 ```text
 A  >= 2 qualified wallets
 B  >= 3 qualified wallets
-C  >= 3 wallets + at least one S2/S3
+C  >= 3 wallets + at least one higher performance tier
 D  >= 3 wallets + Meme Hunter participation
 E  stronger independent accumulation + positive validated net flow
 ```
@@ -260,6 +435,8 @@ Validation should answer:
 - how stable are rules across different market periods?
 - which conditions raise win rate without collapsing trade frequency?
 - when does wallet activity provide lead rather than late confirmation?
+- do S4/S5 add useful separation beyond S1/S2/S3?
+- which Meme Hunter evidence predicts ordinary +1% trades versus true mega-runners?
 
 This stage should freeze the simplest robust rule set before ML is allowed to influence signals.
 
@@ -276,13 +453,13 @@ rule-based qualification
         ↓
 rule-based smart-money candidate
         ↓
-paper-trading dataset
+paper-trading + explosion dataset
         ↓
 validated features
         ↓
 ML ranker / probability model
         ↓
-TAKE / SKIP ranking evidence
+TAKE / SKIP or runner-probability evidence
 ```
 
 AI/ML must **not** replace the deterministic wallet pipeline.
@@ -295,20 +472,41 @@ The preferred first models are tabular models such as:
 
 A general-purpose LLM is not the preferred core model for numerical trade-outcome prediction.
 
-Primary ML target:
+Primary short-horizon ML target:
 
 ```text
 P(+1% before -1%)
 ```
 
-Possible secondary targets:
+Secondary momentum targets:
 
 ```text
-P(+5% within 6H)
-P(+10% within 24H)
+P(+5%)
+P(+10%)
 P(+20%)
 P(+50%)
-P(2x)
+```
+
+Meme Hunter / monster-runner targets:
+
+```text
+P(>=2x)
+P(>=5x)
+P(>=10x)
+P(>=20x)
+P(>=50x)
+P(>=100x)
+expected / predicted max_multiple
+```
+
+The model should therefore distinguish two different problems:
+
+```text
+TRADE QUALITY
+→ can this signal reach +1% before -1%?
+
+MONSTER-RUNNER DISCOVERY
+→ can this token become >=2x, and how far might the expansion continue?
 ```
 
 ML features may include:
@@ -320,8 +518,11 @@ holding-time profile
 sample size
 profit factor
 drawdown reference
-wallet segment
+performance tier
 Meme Hunter evidence
+historical max-multiple distribution
+explosion hit rates
+entry lead-time profile
 independent-wallet count
 net flow
 signal freshness
@@ -335,7 +536,8 @@ ML deployment policy:
 3. Run in **shadow mode** first.
 4. Compare rule-only vs ML-filtered results.
 5. Only promote ML if it improves out-of-sample expectancy / hit rate without unacceptable trade-frequency loss.
-6. If ML does not add stable edge, keep the rule-based system.
+6. Monster-runner models must be evaluated separately from +1% trade models.
+7. If ML does not add stable edge, keep the rule-based system.
 
 ## Live-runtime status
 
@@ -475,8 +677,9 @@ WALLET_STAGE1_DATA_FOUNDATION = PASS
 WALLET_STAGE2_TRANSACTION_NORMALIZATION = PASS
 WALLET_STAGE3_POSITION_TRADE_RECONSTRUCTION = PASS
 WALLET_STAGE4_HISTORICAL_PERFORMANCE_ENGINE = PASS
-WALLET_STAGE5_CLASSIFICATION_V1 = PASS
-WALLET_STAGE6_MEME_EXPLOSION_HUNTER = PASS
+WALLET_STAGE5_CLASSIFICATION_V1_S1_TO_S3 = PASS
+TARGET_TAXONOMY_S4_S5 = DOCUMENTED_NOT_YET_IMPLEMENTED
+WALLET_STAGE6_MEME_EXPLOSION_HUNTER_V1 = PASS
 WALLET_STAGE7_QUALIFIED_WALLET_REGISTRY = PASS
 WALLET_STAGE8_LIVE_WALLET_MONITOR_CORE = PASS
 WALLET_STAGE8_5_VERCEL_DASHBOARD_UI = PASS
@@ -485,6 +688,6 @@ NEXT = WALLET_STAGE9_SMART_MONEY_SIGNAL_OUTPUT
 
 FUTURE:
 WALLET_STAGE10_WALLET_ONLY_PAPER_TRADING
-WALLET_STAGE11_VALIDATION_OPTIMIZATION
+WALLET_STAGE11_VALIDATION_OPTIMIZATION_AND_S4_S5
 WALLET_STAGE12_OPTIONAL_ML_RANKER
 ```
