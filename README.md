@@ -41,8 +41,8 @@ BabaBot Market Radar
 | 1 | PASS | Solana-first data foundation |
 | 2 | PASS | Transaction normalization |
 | 3 | PASS | Position / trade reconstruction |
-| 4 | NEXT | Historical wallet performance engine |
-| 5 | PLANNED | S1 / S2 / S3 classification |
+| 4 | PASS | Historical wallet performance engine |
+| 5 | NEXT | S1 / S2 / S3 classification |
 | 6 | PLANNED | Meme / explosion hunter discovery |
 | 7 | PLANNED | Qualified wallet registry |
 | 8 | PLANNED | Live wallet monitor |
@@ -65,6 +65,10 @@ BabaBot Market Radar
 ## Current files
 
 ```text
+.github/
+└── workflows/
+    └── tests.yml
+
 docs/
 ├── WALLET_STAGE1_DATA_FOUNDATION_Preregistration.md
 ├── WALLET_STAGE1_DATA_FOUNDATION_Result.md
@@ -74,23 +78,28 @@ docs/
 ├── WALLET_STAGE2_TRANSACTION_NORMALIZATION_Status.txt
 ├── WALLET_STAGE3_POSITION_TRADE_RECONSTRUCTION_Preregistration.md
 ├── WALLET_STAGE3_POSITION_TRADE_RECONSTRUCTION_Result.md
-└── WALLET_STAGE3_POSITION_TRADE_RECONSTRUCTION_Status.txt
+├── WALLET_STAGE3_POSITION_TRADE_RECONSTRUCTION_Status.txt
+├── WALLET_STAGE4_HISTORICAL_PERFORMANCE_Preregistration.md
+├── WALLET_STAGE4_HISTORICAL_PERFORMANCE_Result.md
+└── WALLET_STAGE4_HISTORICAL_PERFORMANCE_Status.txt
 
 research/
 ├── __init__.py
 ├── wallet_s1_data_foundation.py
 ├── wallet_s1_helius_probe.py
 ├── wallet_s2_transaction_normalizer.py
-└── wallet_s3_position_reconstruction.py
+├── wallet_s3_position_reconstruction.py
+└── wallet_s4_historical_performance.py
 
 tests/
 ├── __init__.py
 ├── test_wallet_s1_data_foundation.py
 ├── test_wallet_s2_transaction_normalizer.py
-└── test_wallet_s3_position_reconstruction.py
+├── test_wallet_s3_position_reconstruction.py
+└── test_wallet_s4_historical_performance.py
 ```
 
-## Run deterministic Stage 1–3 tests
+## Run deterministic Stage 1–4 tests
 
 ```bash
 python -m unittest discover -s tests -v
@@ -111,5 +120,6 @@ python research/wallet_s1_helius_probe.py --wallet <SOLANA_WALLET> --limit 10 --
 WALLET_STAGE1_DATA_FOUNDATION = PASS
 WALLET_STAGE2_TRANSACTION_NORMALIZATION = PASS
 WALLET_STAGE3_POSITION_TRADE_RECONSTRUCTION = PASS
-NEXT = WALLET_STAGE4_HISTORICAL_PERFORMANCE_ENGINE
+WALLET_STAGE4_HISTORICAL_PERFORMANCE_ENGINE = PASS
+NEXT = WALLET_STAGE5_CLASSIFICATION_V1
 ```
