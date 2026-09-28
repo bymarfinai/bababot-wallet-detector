@@ -70,11 +70,13 @@ No consumer is required for Wallet Detector itself to work.
 | 8 | PASS CORE | Live wallet monitor core |
 | 8.5 | PASS | Vercel dashboard / UI |
 | 9 | PASS | Smart-money signal output layer |
-| 10 | NEXT | Wallet-only paper trading |
+| 10 | PASS ENGINE | Wallet-only paper-trading engine; real replay pending |
 | 11 | PLANNED | Validation + rule optimization + S4/S5 calibration |
 | 12 | PLANNED | Optional ML ranker / probability layer |
 
 MCD integration is **not** a required development stage.
+
+Stage 10 is not considered empirically complete until real Stage-9 signal snapshots and causal token-price data have been replayed through the frozen engine.
 
 ## Stage 1 frozen principles
 
@@ -377,28 +379,33 @@ The output is consumable independently through JSON / a small external handoff b
 
 ## Stage 10 — Wallet-Only Paper Trading
 
-Wallet Detector should be tested **independently** before any optional combination with MCD.
+Wallet Detector is tested **independently** before any optional combination with MCD.
 
-Primary baseline objective:
+Implemented baseline:
 
 ```text
 TP = +1.0%
 SL = -1.0%
 RR = 1:1
-fees + estimated slippage included
+fees + estimated slippage included as explicit inputs
 ```
 
-For SHORT, the direction is mirrored.
+For SHORT, direction is mirrored.
 
-Baseline execution rules:
+Frozen execution rules:
 
-- signal confirmed from Wallet Detector only
-- entry at the first causal tradable price after the signal
-- one active position per symbol
-- no overlapping re-entry on the same symbol until the current paper position closes
-- record multiple evaluation horizons even if the trading timeout is shorter
+- Wallet Detector / Stage-9 signal only
+- ACCUMULATION → LONG
+- DISTRIBUTION → SHORT
+- NEUTRAL → no trade
+- entry at the first OHLC bar open strictly after the signal timestamp
+- one active position per symbol per candidate rule
+- no overlapping same-symbol re-entry until the current paper position closes
+- same-bar TP + SL ambiguity resolves conservatively to SL-first
+- incomplete price history remains INCOMPLETE_DATA rather than being forced into an outcome
+- fee and slippage assumptions are explicit caller inputs rather than hardcoded market claims
 
-Evaluation horizons should include at least:
+Evaluation horizons:
 
 ```text
 30m
@@ -408,47 +415,93 @@ Evaluation horizons should include at least:
 24H
 ```
 
-Every paper trade should preserve:
+Every paper trade preserves:
 
 ```text
-symbol
+symbol / mint
 side
 signal time
+signal fingerprint
 entry time
-entry price
+entry delay
+raw + slippage-adjusted entry
+TP / SL trigger prices
+exit time / exit reason
+raw + slippage-adjusted exit
 qualified-wallet count
-S1 / S2 / S3 / S4 / S5 counts
-Meme Hunter participation
-Meme Hunter historical explosion profile
+S1 / S2 / S3 / future S4 / S5 counts
+Stage-6 Meme Hunter evidence
 BUY / SELL wallet counts
-net flow
-TP / SL
-MFE
-MAE
-time to TP
-time to SL
-net PnL after fees/slippage
+wallet-net breadth
+validated USD flow
+freshness / persistence
+MFE / MAE
+time to TP / SL
+30m / 1H / 4H / 12H / 24H path metrics
+gross return
+net return after fees/slippage
 ```
 
-The key metric is not simply direction accuracy.
-
-The main benchmark is:
+Primary benchmark:
 
 ```text
 P(+1% before -1%)
 ```
 
-Candidate rule variants should be compared empirically, for example:
+Candidate variants are now implemented as experiments:
 
 ```text
-A  >= 2 qualified wallets
-B  >= 3 qualified wallets
-C  >= 3 wallets + at least one higher performance tier
-D  >= 3 wallets + Meme Hunter participation
-E  stronger independent accumulation + positive validated net flow
+A  >= 2 directional qualified wallets
+
+B  >= 3 directional qualified wallets
+
+C  >= 3 directional qualified wallets
+   + same-side higher-tier participation
+
+D  >= 3 directional qualified wallets
+   + same-side Stage-6 Meme Hunter evidence
+
+E  >= 3 directional qualified wallets
+   + same-side wallet breadth advantage >= 2
+   + validated USD flow aligned with signal direction
 ```
 
-The winning V1 rule must come from data rather than discretionary weighting.
+Stage 10 intentionally does **not** select a winner.
+
+```text
+winner_selected = false
+selection_policy = STAGE11_VALIDATION_REQUIRED
+```
+
+### Current Stage-10 status
+
+Deterministic engine and methodology:
+
+```text
+PASS
+31 / 31 Stage-10 tests
+170 / 170 full Python regression
+```
+
+Real trading-edge evidence:
+
+```text
+PENDING
+```
+
+The repository does not yet contain a sufficiently populated real dataset combining:
+
+```text
+historical Stage-9 signal snapshots
++
+causal token OHLC
++
+explicit real execution-cost assumptions
+```
+
+Therefore Stage 10 currently proves **backtest correctness**, not profitability.
+
+The next work item is still inside Stage 10: populate and replay a real dataset through candidates A–E. Stage 11 must not optimize rules from synthetic unit-test outcomes.
 
 ## Stage 11 — Validation / Optimization
 
@@ -638,7 +691,10 @@ docs/
 ├── WALLET_STAGE8_5_VERCEL_DASHBOARD_UI_Status.txt
 ├── WALLET_STAGE9_SMART_MONEY_SIGNAL_OUTPUT_Preregistration.md
 ├── WALLET_STAGE9_SMART_MONEY_SIGNAL_OUTPUT_Result.md
-└── WALLET_STAGE9_SMART_MONEY_SIGNAL_OUTPUT_Status.txt
+├── WALLET_STAGE9_SMART_MONEY_SIGNAL_OUTPUT_Status.txt
+├── WALLET_STAGE10_PAPER_TRADING_Preregistration.md
+├── WALLET_STAGE10_PAPER_TRADING_Result.md
+└── WALLET_STAGE10_PAPER_TRADING_Status.txt
 
 research/
 ├── __init__.py
@@ -652,7 +708,8 @@ research/
 ├── wallet_s7_qualified_registry.py
 ├── wallet_s8_live_monitor.py
 ├── wallet_s8_5_dashboard_contract.py
-└── wallet_s9_smart_money_signal.py
+├── wallet_s9_smart_money_signal.py
+└── wallet_s10_paper_trading.py
 
 tests/
 ├── __init__.py
@@ -665,7 +722,8 @@ tests/
 ├── test_wallet_s7_qualified_registry.py
 ├── test_wallet_s8_live_monitor.py
 ├── test_wallet_s8_5_dashboard_contract.py
-└── test_wallet_s9_smart_money_signal.py
+├── test_wallet_s9_smart_money_signal.py
+└── test_wallet_s10_paper_trading.py
 
 package.json
 tsconfig.json
@@ -674,7 +732,7 @@ next-env.d.ts
 .env.example
 ```
 
-## Run deterministic Stage 1–9 tests
+## Run deterministic Stage 1–10 tests
 
 ```bash
 python -m unittest discover -s tests -v
@@ -714,10 +772,12 @@ WALLET_STAGE7_QUALIFIED_WALLET_REGISTRY = PASS
 WALLET_STAGE8_LIVE_WALLET_MONITOR_CORE = PASS
 WALLET_STAGE8_5_VERCEL_DASHBOARD_UI = PASS
 WALLET_STAGE9_SMART_MONEY_SIGNAL_OUTPUT = PASS
+WALLET_STAGE10_PAPER_TRADING_ENGINE = PASS
+WALLET_STAGE10_EMPIRICAL_REPLAY = PENDING_REAL_DATA
 
-NEXT = WALLET_STAGE10_WALLET_ONLY_PAPER_TRADING
+NEXT = WALLET_STAGE10_EMPIRICAL_REPLAY_ACTIVATION
 
-FUTURE:
+FUTURE AFTER REAL STAGE10 RESULTS:
 WALLET_STAGE11_VALIDATION_OPTIMIZATION_AND_S4_S5
 WALLET_STAGE12_OPTIONAL_ML_RANKER
 ```
