@@ -234,6 +234,10 @@ class Stage10A0WalletDiscoveryTests(unittest.TestCase):
             elif method_name == "getBlocks":
                 result = [100, 101]
             elif method_name == "getBlock":
+                self.assertEqual(
+                    request["params"][1]["maxSupportedTransactionVersion"],
+                    1,
+                )
                 slot = request["params"][0]
                 result = block(
                     slot,
