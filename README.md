@@ -19,7 +19,9 @@ Future MCD/Market Radar use is optional and should consume Wallet Detector throu
 ## Architecture
 
 ```text
-Historical Wallet Discovery
+Automatic Wallet Universe Discovery
+        ↓
+Historical Wallet Discovery / Backfill
         ↓
 Transaction Normalization
         ↓
@@ -70,13 +72,57 @@ No consumer is required for Wallet Detector itself to work.
 | 8 | PASS CORE | Live wallet monitor core |
 | 8.5 | PASS | Vercel dashboard / UI |
 | 9 | PASS | Smart-money signal output layer |
-| 10 | PASS ENGINE + 10A | Paper trading + Supabase causal historical backfill; real population/OHLC replay pending |
+| 10A-0 | NEXT | Automatic wallet universe discovery from real Solana activity |
+| 10A-1 | PASS ENGINE | Supabase causal historical backfill; real population waits on automatic discovery activation |
+| 10B | PENDING | Real token OHLC ingestion |
+| 10C | PENDING | Real empirical A/B/C/D/E replay |
 | 11 | PLANNED | Validation + rule optimization + S4/S5 calibration |
 | 12 | PLANNED | Optional ML ranker / probability layer |
 
 MCD integration is **not** a required development stage.
 
 Stage 10 is not considered empirically complete until real Stage-9 signal snapshots and causal token-price data have been replayed through the frozen engine.
+
+## Product discovery principle
+
+Wallet Detector is intended to **find smart wallets automatically**, not require the operator to maintain a hand-picked wallet list.
+
+The target product loop is:
+
+```text
+Solana blockchain
+        ↓
+automatic candidate-wallet discovery
+        ↓
+causal historical reconstruction
+        ↓
+S1 / S2 / S3 qualification
++ orthogonal specialty evidence
+        ↓
+qualified wallet registry
+        ↓
+live monitoring
+        ↓
+smart-money signal
+        ↓
+paper-trading validation
+```
+
+Wallet discovery and wallet qualification are separate concerns:
+
+```text
+DISCOVERY
+= which wallets were observably active and therefore eligible to be evaluated?
+
+QUALIFICATION
+= which discovered wallets actually satisfy the Stage-5 performance rules?
+```
+
+A manually supplied wallet list remains acceptable for unit tests, debugging, provider probes, and controlled bootstrap comparisons, but it is **not the final production discovery mechanism**.
+
+The canonical source is the public Solana blockchain. Helius, native RPC, or another verified provider may be used as an access/indexing layer. An API provider is not the source of wallet identity and must not be embedded into qualification semantics.
+
+Historical wallet-universe construction must be causal. A wallet may only enter a historical universe when it was discoverable from information available by that cutoff. Current-success/future-profit information must not be used to construct past universes.
 
 ## Stage 1 frozen principles
 
@@ -501,7 +547,31 @@ Full Python regression:
 196 / 196 PASS
 ```
 
-### Stage 10A — Supabase causal historical backfill
+### Stage 10A-0 — Automatic wallet universe discovery
+
+**NEXT.**
+
+The existing historical backfill engine currently accepts explicit wallet inputs for testing/bootstrap, but the final activation path must discover candidate wallets automatically from real Solana activity.
+
+Stage 10A-0 must:
+
+- discover candidate wallet addresses automatically;
+- preserve transaction/signature provenance;
+- deduplicate deterministically;
+- support historical as-of cutoffs;
+- avoid current-success / future-profit selection bias;
+- feed Stage 10A-1 without manual wallet editing;
+- keep provider transport separate from discovery semantics.
+
+Helius may be used as an indexed access layer, but it is not an architectural dependency. Native Solana RPC remains a valid audit/fallback path.
+
+See:
+
+```text
+docs/WALLET_STAGE10A0_AUTOMATIC_WALLET_UNIVERSE_DISCOVERY_Preregistration.md
+```
+
+### Stage 10A-1 — Supabase causal historical backfill
 
 Implemented:
 
@@ -519,13 +589,9 @@ Historical qualification is **not** copied backward from today's registry. A sta
 
 Stage-6 Meme evidence is disabled in historical Stage-10A replay until an as-of-safe reconstruction exists. Therefore historical A/B/C/E can be prepared causally, while historical Rule D remains pending.
 
-The Supabase project is live, but real Stage-10A population still requires runtime inputs:
+The Supabase project and causal backfill engine are live. The current runner can still accept manual wallet inputs for tests/bootstrap, but **real product activation is now intentionally blocked on Stage 10A-0 automatic discovery**.
 
-```text
-HELIUS_API_KEY
-real wallet universe
-server-side Supabase secret
-```
+If Helius is chosen as the indexed provider, `HELIUS_API_KEY` is required by that transport. It is not required by the Wallet Detector architecture itself.
 
 No trading edge is claimed from Stage 10A implementation tests.
 
@@ -754,6 +820,7 @@ docs/
 ├── WALLET_STAGE10_PAPER_TRADING_Status.txt
 ├── WALLET_STAGE10_EMPIRICAL_REPLAY_BUNDLE_CONTRACT.md
 ├── WALLET_STAGE10_EMPIRICAL_REPLAY_ACTIVATION_Result.md
+├── WALLET_STAGE10A0_AUTOMATIC_WALLET_UNIVERSE_DISCOVERY_Preregistration.md
 ├── WALLET_STAGE10A_SUPABASE_CAUSAL_BACKFILL_Result.md
 └── WALLET_STAGE10A_SUPABASE_CAUSAL_BACKFILL_Status.txt
 
@@ -810,7 +877,7 @@ python -m unittest discover -s tests -v
 ```
 
 
-## Run Stage 10A causal historical backfill
+## Run Stage 10A-1 causal historical backfill
 
 Server-side environment:
 
@@ -899,14 +966,17 @@ WALLET_STAGE8_5_VERCEL_DASHBOARD_UI = PASS
 WALLET_STAGE9_SMART_MONEY_SIGNAL_OUTPUT = PASS
 WALLET_STAGE10_PAPER_TRADING_ENGINE = PASS
 WALLET_STAGE10_EMPIRICAL_REPLAY_PIPELINE = PASS
-WALLET_STAGE10A_SUPABASE_ADAPTER = PASS
-WALLET_STAGE10A_CAUSAL_HISTORICAL_BACKFILL = PASS
-WALLET_STAGE10A_REAL_POPULATION = PENDING_RUNTIME_INPUTS
+WALLET_STAGE10A0_AUTOMATIC_WALLET_UNIVERSE_DISCOVERY = NEXT
+WALLET_STAGE10A1_SUPABASE_ADAPTER = PASS
+WALLET_STAGE10A1_CAUSAL_HISTORICAL_BACKFILL = PASS
+WALLET_STAGE10A1_REAL_POPULATION = BLOCKED_BY_DISCOVERY_ACTIVATION
+WALLET_STAGE10B_REAL_OHLC = PENDING
+WALLET_STAGE10C_EMPIRICAL_REPLAY = PENDING_REAL_DATA
 WALLET_STAGE10_EMPIRICAL_REPLAY_DATASET = PENDING_REAL_DATA
 WALLET_STAGE10_REAL_A_B_C_E_COMPARISON = PENDING
 WALLET_STAGE10_HISTORICAL_RULE_D = PENDING_CAUSAL_STAGE6
 
-NEXT = REAL_STAGE10A_POPULATION + STAGE10B_REAL_OHLC_INGESTION
+NEXT = STAGE10A0_AUTOMATIC_WALLET_UNIVERSE_DISCOVERY
 
 FUTURE AFTER REAL STAGE10 RESULTS:
 WALLET_STAGE11_VALIDATION_OPTIMIZATION_AND_S4_S5
