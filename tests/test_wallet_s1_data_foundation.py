@@ -81,6 +81,21 @@ class Stage1DataFoundationTests(unittest.TestCase):
         self.assertEqual(report["signature"], "sig-1")
         self.assertEqual(report["token_delta_count"], 2)
 
+    def test_token_account_missing_from_post_is_treated_as_zero(self):
+        raw = {
+            "meta": {
+                "preTokenBalances": [{
+                    "owner": WALLET,
+                    "mint": USDC,
+                    "uiTokenAmount": {"amount": "25000000", "decimals": 6},
+                }],
+                "postTokenBalances": [],
+            }
+        }
+        rows = extract_wallet_token_deltas(raw, WALLET)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].raw_delta, -25_000_000)
+
 
 if __name__ == "__main__":
     unittest.main()
