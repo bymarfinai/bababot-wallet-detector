@@ -1,0 +1,17 @@
+WALLET_STAGE8_5_VERCEL_DASHBOARD_UI_PASS
+python_tests=114/114
+stage8_5_contract_tests=9/9
+ui_typecheck=PASS
+ui_production_build=PASS
+ui_production_smoke=PASS
+nextjs=16.3.6
+dependency_vulnerabilities=0
+runtime_modes=LIVE,DEMO,OFFLINE
+windows=5m,15m,1h
+auto_refresh_seconds=15
+server_secret_exposure=none
+vercel_team=bymarfinai_projects
+vercel_project_count=0
+vercel_project_link=PENDING
+vercel_deployment=PENDING
+next=WALLET_STAGE9_SMART_MONEY_SIGNAL_MCD_INTEGRATION
