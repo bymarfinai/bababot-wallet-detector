@@ -1,0 +1,6 @@
+WALLET_STAGE1_DATA_FOUNDATION_PASS
+tests=4/4
+chain=solana
+universe=dynamic_all_wallet_touched_mints
+repository=bymarfinai/bababot-wallet-detector
+next=WALLET_STAGE2_TRANSACTION_NORMALIZATION
