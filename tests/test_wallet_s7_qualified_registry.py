@@ -269,6 +269,7 @@ class Stage7QualifiedRegistryTests(unittest.TestCase):
         active = build_registry_record(
             wallet=WALLET,
             classification=classification(),
+            performance=performance(),
         )
         inactive = build_registry_record(
             wallet=OTHER_WALLET,
@@ -293,6 +294,7 @@ class Stage7QualifiedRegistryTests(unittest.TestCase):
         a = build_registry_record(
             wallet=WALLET,
             classification=classification(),
+            performance=performance(),
         )
         b = build_registry_record(
             wallet=OTHER_WALLET,
@@ -321,6 +323,7 @@ class Stage7QualifiedRegistryTests(unittest.TestCase):
         row = build_registry_record(
             wallet=WALLET,
             classification=classification(),
+            performance=performance(),
         )
         with self.assertRaises(ValueError):
             build_registry_snapshot(
@@ -332,6 +335,7 @@ class Stage7QualifiedRegistryTests(unittest.TestCase):
         old = build_registry_record(
             wallet=WALLET,
             classification=classification(),
+            performance=performance(),
         )
         new = build_registry_record(
             wallet=WALLET,
@@ -349,6 +353,37 @@ class Stage7QualifiedRegistryTests(unittest.TestCase):
             merged[0]["record_fingerprint"],
             new["record_fingerprint"],
         )
+
+    def test_active_wallet_requires_stage4_performance_provenance(self):
+        with self.assertRaises(ValueError):
+            build_registry_record(
+                wallet=WALLET,
+                classification=classification(),
+            )
+
+    def test_snapshot_rejects_tampered_record(self):
+        row = build_registry_record(
+            wallet=WALLET,
+            classification=classification(),
+            performance=performance(),
+        )
+        tampered = dict(row)
+        tampered["registry_status"] = "UNQUALIFIED"
+        with self.assertRaises(ValueError):
+            build_registry_snapshot(
+                [tampered],
+                snapshot_id="snapshot-1",
+            )
+
+    def test_source_version_mismatch_is_rejected(self):
+        bad = performance()
+        bad["version"] = "wallet-s4-v999"
+        with self.assertRaises(ValueError):
+            build_registry_record(
+                wallet=WALLET,
+                classification=classification(),
+                performance=bad,
+            )
 
     def test_source_versions_are_preserved(self):
         row = build_registry_record(
