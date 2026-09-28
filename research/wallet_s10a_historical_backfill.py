@@ -624,10 +624,40 @@ def collect_real_histories(
     }
 
 
+def persist_stage10a_backfill(
+    client: SupabaseRestClient,
+    *,
+    raw_by_wallet: dict[str, Iterable[dict[str, Any]]],
+    normalized_by_wallet: dict[str, Iterable[dict[str, Any]]],
+    replay: dict[str, Any],
+) -> dict[str, Any]:
+    raw_rows = client.persist_historical_raw(raw_by_wallet)
+    normalized_rows = client.persist_normalized_history(
+        normalized_by_wallet
+    )
+    registry_result = client.persist_registry_snapshots(
+        replay.get("registry_snapshots") or []
+    )
+    wallet_event_rows = client.persist_wallet_events(
+        replay.get("wallet_events") or []
+    )
+    signal_result = client.persist_signal_snapshots(
+        replay.get("signal_snapshots") or []
+    )
+    return {
+        "historical_raw_rows": raw_rows,
+        "normalized_history_rows": normalized_rows,
+        **registry_result,
+        "wallet_event_rows": wallet_event_rows,
+        **signal_result,
+    }
+
+
 def persist_stage10a_replay(
     client: SupabaseRestClient,
     replay: dict[str, Any],
 ) -> dict[str, Any]:
+    """Compatibility helper for callers that already persisted raw evidence."""
     registry_result = client.persist_registry_snapshots(
         replay.get("registry_snapshots") or []
     )
@@ -753,7 +783,12 @@ def main() -> int:
     persistence = None
     if not args.dry_run:
         client = SupabaseRestClient.from_env()
-        persistence = persist_stage10a_replay(client, replay)
+        persistence = persist_stage10a_backfill(
+            client,
+            raw_by_wallet=raw_by_wallet,
+            normalized_by_wallet=normalized,
+            replay=replay,
+        )
 
     report = {
         "version": STAGE10A_VERSION,
