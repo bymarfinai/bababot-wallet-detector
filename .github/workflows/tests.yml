@@ -17,3 +17,19 @@ jobs:
           python-version: "3.12"
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
+
+  ui-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install UI dependencies
+        run: npm install
+      - name: Typecheck dashboard
+        run: npm run typecheck
+      - name: Build dashboard
+        run: npm run build
