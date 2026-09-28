@@ -1,0 +1,7 @@
+WALLET_STAGE2_TRANSACTION_NORMALIZATION_PASS
+tests_total=14/14
+stage1_tests=5/5
+stage2_tests=9/9
+buy_sell_quote_rule=verified_stable_or_sol
+ambiguous_multi_leg=preserve_no_guess
+next=WALLET_STAGE3_POSITION_TRADE_RECONSTRUCTION
