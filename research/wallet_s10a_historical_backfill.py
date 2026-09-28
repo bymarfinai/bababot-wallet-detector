@@ -27,6 +27,9 @@ from research.wallet_s9_smart_money_signal import (
     build_smart_money_signal_snapshot,
 )
 from research.wallet_supabase_adapter import SupabaseRestClient
+from research.wallet_s10a0_wallet_universe_discovery import (
+    wallet_addresses_from_universe,
+)
 
 STAGE10A_VERSION = "wallet-s10a-v1"
 STAGE8_VERSION = "wallet-s8-v1"
@@ -677,8 +680,23 @@ def persist_stage10a_replay(
 def _load_wallets(
     explicit: Iterable[str],
     wallets_file: str | None,
+    universe_file: str | None = None,
 ) -> list[str]:
     values = list(explicit)
+
+    if universe_file:
+        parsed = json.loads(
+            Path(universe_file).read_text(encoding="utf-8")
+        )
+        universe = (
+            parsed.get("universe")
+            if isinstance(parsed, dict) and "universe" in parsed
+            else parsed
+        )
+        if not isinstance(universe, dict):
+            raise ValueError("universe file must contain a Stage-10A-0 object")
+        values.extend(wallet_addresses_from_universe(universe))
+
     if wallets_file:
         path = Path(wallets_file)
         raw = path.read_text(encoding="utf-8")
@@ -693,6 +711,7 @@ def _load_wallets(
                 for line in raw.splitlines()
                 if line.strip() and not line.lstrip().startswith("#")
             )
+
     wallets = sorted({validate_solana_address(v) for v in values})
     if not wallets:
         raise ValueError("at least one wallet is required")
@@ -725,6 +744,14 @@ def main() -> int:
         "--wallets-file",
         default=None,
         help="JSON array or newline-delimited wallet addresses",
+    )
+    parser.add_argument(
+        "--universe-file",
+        default=None,
+        help=(
+            "Stage-10A-0 discovery artifact. Preferred production handoff; "
+            "manual wallet inputs remain bootstrap/test only."
+        ),
     )
     parser.add_argument(
         "--signal-from-unix",
@@ -760,7 +787,11 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    wallets = _load_wallets(args.wallet, args.wallets_file)
+    wallets = _load_wallets(
+        args.wallet,
+        args.wallets_file,
+        args.universe_file,
+    )
     api_key = os.environ.get("HELIUS_API_KEY")
     if not api_key:
         raise SystemExit("HELIUS_API_KEY is required")
