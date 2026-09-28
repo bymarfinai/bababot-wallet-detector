@@ -39,14 +39,14 @@ BabaBot Market Radar
 | Stage | Status | Responsibility |
 |---|---|---|
 | 1 | PASS | Solana-first data foundation |
-| 2 | NEXT | Transaction normalization |
-| 3 | PLANNED | Position / trade reconstruction |
+| 2 | PASS | Transaction normalization |
+| 3 | NEXT | Position / trade reconstruction |
 | 4 | PLANNED | Historical wallet performance engine |
 | 5 | PLANNED | S1 / S2 / S3 classification |
 | 6 | PLANNED | Meme / explosion hunter discovery |
 | 7 | PLANNED | Qualified wallet registry |
 | 8 | PLANNED | Live wallet monitor |
-| 9 | PLANNED | Smart-money signal + MCD integration |
+| 8.5 | PLANNED | Vercel dashboard / UI |\n| 9 | PLANNED | Smart-money signal + MCD integration |
 | 10 | PLANNED | Validation + ML optimization |
 
 ## Stage 1 frozen principles
@@ -76,13 +76,14 @@ research/
 
 tests/
 ├── __init__.py
-└── test_wallet_s1_data_foundation.py
+├── test_wallet_s1_data_foundation.py
+└── test_wallet_s2_transaction_normalizer.py
 ```
 
-## Run deterministic Stage 1 tests
+## Run deterministic Stage 1–2 tests
 
 ```bash
-python -m unittest tests.test_wallet_s1_data_foundation -v
+python -m unittest discover -s tests -v
 ```
 
 ## Optional real Helius probe
