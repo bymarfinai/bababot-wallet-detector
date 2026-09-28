@@ -89,6 +89,59 @@ def _registry_record_rows(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
+def raw_wallet_transaction_row(
+    wallet: str,
+    tx: dict[str, Any],
+) -> dict[str, Any]:
+    wallet = str(wallet or "")
+    transaction = tx.get("transaction") or {}
+    signatures = transaction.get("signatures") or []
+    signature = str(signatures[0]) if signatures else ""
+    if not wallet or not signature:
+        raise ValueError(
+            "historical raw transaction requires wallet and signature"
+        )
+    return {
+        "wallet": wallet,
+        "signature": signature,
+        "chain": "solana",
+        "source": "helius_gtfa",
+        "slot": tx.get("slot"),
+        "block_time_unix": tx.get("blockTime"),
+        "raw_payload": tx,
+    }
+
+
+def normalized_history_row(
+    event: dict[str, Any],
+) -> dict[str, Any]:
+    wallet = str(event.get("wallet") or "")
+    signature = str(event.get("signature") or "")
+    block_time = event.get("block_time")
+    if not wallet or not signature or block_time is None:
+        raise ValueError(
+            "normalized history event requires wallet, signature, block_time"
+        )
+    return {
+        "wallet": wallet,
+        "signature": signature,
+        "stage2_version": event.get("version") or "wallet-s2-v1",
+        "chain": event.get("chain") or "solana",
+        "slot": event.get("slot"),
+        "block_time_unix": int(block_time),
+        "event_type": event.get("event_type"),
+        "side": event.get("side"),
+        "base_asset": event.get("base_asset"),
+        "quote_asset": event.get("quote_asset"),
+        "base_amount": event.get("base_amount"),
+        "quote_amount": event.get("quote_amount"),
+        "usd_notional": event.get("usd_notional"),
+        "execution_price": event.get("execution_price_quote"),
+        "network_fee_lamports": event.get("network_fee_lamports"),
+        "normalized_payload": event,
+    }
+
+
 def wallet_event_row(event: dict[str, Any]) -> dict[str, Any]:
     wallet = str(event.get("wallet") or "")
     signature = str(event.get("signature") or "")
@@ -352,6 +405,36 @@ class SupabaseRestClient:
             )
             count += len(batch)
         return count
+
+    def persist_historical_raw(
+        self,
+        raw_by_wallet: dict[str, Iterable[dict[str, Any]]],
+    ) -> int:
+        rows = [
+            raw_wallet_transaction_row(wallet, tx)
+            for wallet, transactions in sorted(raw_by_wallet.items())
+            for tx in transactions
+        ]
+        return self.upsert_rows(
+            "historical_wallet_transactions",
+            rows,
+            on_conflict="wallet,signature",
+        )
+
+    def persist_normalized_history(
+        self,
+        normalized_by_wallet: dict[str, Iterable[dict[str, Any]]],
+    ) -> int:
+        rows = [
+            normalized_history_row(event)
+            for _wallet, events in sorted(normalized_by_wallet.items())
+            for event in events
+        ]
+        return self.upsert_rows(
+            "normalized_wallet_history",
+            rows,
+            on_conflict="wallet,signature",
+        )
 
     def persist_registry_snapshots(
         self,
