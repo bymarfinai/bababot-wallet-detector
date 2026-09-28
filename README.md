@@ -70,7 +70,7 @@ No consumer is required for Wallet Detector itself to work.
 | 8 | PASS CORE | Live wallet monitor core |
 | 8.5 | PASS | Vercel dashboard / UI |
 | 9 | PASS | Smart-money signal output layer |
-| 10 | PASS ENGINE | Wallet-only paper-trading engine; real replay pending |
+| 10 | PASS ENGINE + 10A | Paper trading + Supabase causal historical backfill; real population/OHLC replay pending |
 | 11 | PLANNED | Validation + rule optimization + S4/S5 calibration |
 | 12 | PLANNED | Optional ML ranker / probability layer |
 
@@ -498,8 +498,36 @@ deterministic replay fingerprints
 Full Python regression:
 
 ```text
-182 / 182 PASS
+196 / 196 PASS
 ```
+
+### Stage 10A — Supabase causal historical backfill
+
+Implemented:
+
+```text
+Supabase project + versioned schema
+raw Helius history persistence
+Stage-2 normalized history persistence
+causal Stage-3 → Stage-7 qualification reconstruction
+Stage-8 eligible event reconstruction
+Stage-9 historical signal generation
+batched PostgREST upserts
+```
+
+Historical qualification is **not** copied backward from today's registry. A status change triggered at timestamp T becomes effective only after T, so the transaction that creates qualification is never retroactively counted as a smart-money event.
+
+Stage-6 Meme evidence is disabled in historical Stage-10A replay until an as-of-safe reconstruction exists. Therefore historical A/B/C/E can be prepared causally, while historical Rule D remains pending.
+
+The Supabase project is live, but real Stage-10A population still requires runtime inputs:
+
+```text
+HELIUS_API_KEY
+real wallet universe
+server-side Supabase secret
+```
+
+No trading edge is claimed from Stage 10A implementation tests.
 
 Real trading-edge evidence:
 
@@ -725,7 +753,9 @@ docs/
 ├── WALLET_STAGE10_PAPER_TRADING_Result.md
 ├── WALLET_STAGE10_PAPER_TRADING_Status.txt
 ├── WALLET_STAGE10_EMPIRICAL_REPLAY_BUNDLE_CONTRACT.md
-└── WALLET_STAGE10_EMPIRICAL_REPLAY_ACTIVATION_Result.md
+├── WALLET_STAGE10_EMPIRICAL_REPLAY_ACTIVATION_Result.md
+├── WALLET_STAGE10A_SUPABASE_CAUSAL_BACKFILL_Result.md
+└── WALLET_STAGE10A_SUPABASE_CAUSAL_BACKFILL_Status.txt
 
 research/
 ├── __init__.py
@@ -741,7 +771,9 @@ research/
 ├── wallet_s8_5_dashboard_contract.py
 ├── wallet_s9_smart_money_signal.py
 ├── wallet_s10_paper_trading.py
-└── wallet_s10_replay_activation.py
+├── wallet_s10_replay_activation.py
+├── wallet_s10a_historical_backfill.py
+└── wallet_supabase_adapter.py
 
 tests/
 ├── __init__.py
@@ -756,7 +788,13 @@ tests/
 ├── test_wallet_s8_5_dashboard_contract.py
 ├── test_wallet_s9_smart_money_signal.py
 ├── test_wallet_s10_paper_trading.py
-└── test_wallet_s10_replay_activation.py
+├── test_wallet_s10_replay_activation.py
+└── test_wallet_s10a_historical_backfill.py
+
+supabase/
+└── migrations/
+    ├── 20260928071800_wallet_detector_stage10_core.sql
+    └── 20260928074000_wallet_detector_stage10a_history_evidence.sql
 
 package.json
 tsconfig.json
@@ -771,6 +809,28 @@ next-env.d.ts
 python -m unittest discover -s tests -v
 ```
 
+
+## Run Stage 10A causal historical backfill
+
+Server-side environment:
+
+```text
+WALLET_SUPABASE_URL=https://yuqkodwdqaggsexbqiqa.supabase.co
+WALLET_SUPABASE_SECRET_KEY=<server secret>
+HELIUS_API_KEY=<helius key>
+```
+
+Example:
+
+```bash
+python research/wallet_s10a_historical_backfill.py \
+  --wallets-file wallets.json \
+  --signal-from-unix <timestamp> \
+  --signal-to-unix <timestamp> \
+  --out outputs/stage10a/backfill-report.json
+```
+
+Use `--dry-run` to build the causal replay without writing Supabase.
 
 ## Run Stage 10 real-data replay
 
@@ -839,10 +899,14 @@ WALLET_STAGE8_5_VERCEL_DASHBOARD_UI = PASS
 WALLET_STAGE9_SMART_MONEY_SIGNAL_OUTPUT = PASS
 WALLET_STAGE10_PAPER_TRADING_ENGINE = PASS
 WALLET_STAGE10_EMPIRICAL_REPLAY_PIPELINE = PASS
+WALLET_STAGE10A_SUPABASE_ADAPTER = PASS
+WALLET_STAGE10A_CAUSAL_HISTORICAL_BACKFILL = PASS
+WALLET_STAGE10A_REAL_POPULATION = PENDING_RUNTIME_INPUTS
 WALLET_STAGE10_EMPIRICAL_REPLAY_DATASET = PENDING_REAL_DATA
-WALLET_STAGE10_REAL_A_E_COMPARISON = PENDING
+WALLET_STAGE10_REAL_A_B_C_E_COMPARISON = PENDING
+WALLET_STAGE10_HISTORICAL_RULE_D = PENDING_CAUSAL_STAGE6
 
-NEXT = POPULATE_REAL_STAGE9_AND_OHLC_REPLAY_BUNDLE
+NEXT = REAL_STAGE10A_POPULATION + STAGE10B_REAL_OHLC_INGESTION
 
 FUTURE AFTER REAL STAGE10 RESULTS:
 WALLET_STAGE11_VALIDATION_OPTIMIZATION_AND_S4_S5
