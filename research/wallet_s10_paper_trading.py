@@ -139,12 +139,15 @@ def _rule_evidence(signal: dict[str, Any], rule_id: str) -> dict[str, Any]:
     higher_tier_wallets = sum(
         _tier_side_count(signal, tier, side) for tier in HIGHER_TIERS
     )
-    meme_evidence_wallets = int(
-        (signal.get("meme_hunter_evidence") or {}).get(
-            "evidence_wallet_count"
-        )
-        or 0
-    )
+    aligned_event_side = "BUY" if side == "LONG" else "SELL"
+    aligned_meme_wallets = {
+        str(row.get("wallet") or "")
+        for row in signal.get("contributors") or []
+        if row.get("wallet")
+        and aligned_event_side in set(row.get("sides") or [])
+        and bool(row.get("meme_evidence_available"))
+    }
+    meme_evidence_wallets = len(aligned_meme_wallets)
     wallet_net_aligned = _wallet_net(signal, side)
     usd = signal.get("validated_usd_flow") or {}
     usd_coverage = str(usd.get("coverage") or "UNAVAILABLE")
@@ -270,9 +273,13 @@ def _flatten_signals(
     seen: dict[tuple[int, str], str] = {}
 
     for snapshot in signal_snapshots:
+        if str(snapshot.get("version") or "") != "wallet-s9-v1":
+            raise ValueError("unsupported Stage-9 snapshot version")
         as_of = int(snapshot["as_of"])
         for raw in snapshot.get("signals") or []:
             signal = dict(raw)
+            if str(signal.get("version") or "") != "wallet-s9-v1":
+                raise ValueError("unsupported Stage-9 signal version")
             token = str(signal.get("base_asset") or "")
             if not token:
                 continue
@@ -673,12 +680,15 @@ def _simulate_one_trade(
         for name, seconds in EVALUATION_HORIZONS_SECONDS.items()
     }
 
+    actual_path_end = (
+        int(exit_time)
+        if exit_time is not None
+        else min(timeout_time, int(bars[-1]["timestamp"]))
+    )
     complete_path_bars = [
         bar
         for bar in bars
-        if entry_time
-        <= int(bar["timestamp"])
-        <= min(timeout_time, int(bars[-1]["timestamp"]))
+        if entry_time <= int(bar["timestamp"]) <= actual_path_end
     ]
     if complete_path_bars:
         if side == "LONG":
