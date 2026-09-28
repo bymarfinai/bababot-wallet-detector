@@ -1,0 +1,11 @@
+WALLET_STAGE3_POSITION_TRADE_RECONSTRUCTION_PASS
+stage1_tests=5/5
+stage2_tests=9/9
+stage3_tests=11/11
+tests_cumulative=25/25
+cost_basis=weighted_average
+partial_sell=realized_proportional_cost
+external_flow=contaminate_no_fake_pnl
+mixed_quote=contaminate
+orphan_sell=no_synthetic_entry
+next=WALLET_STAGE4_HISTORICAL_PERFORMANCE_ENGINE
