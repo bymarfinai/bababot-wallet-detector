@@ -20,6 +20,7 @@ CHAIN = "solana"
 DEFAULT_SOLANA_RPC_URL = "https://api.mainnet-beta.solana.com"
 DEFAULT_LOOKBACK_SLOTS = 32
 DEFAULT_RPC_ATTEMPTS = 5
+DEFAULT_MAX_SUPPORTED_TRANSACTION_VERSION = 1
 
 RpcTransport = Callable[
     [str, str, dict[str, str], bytes],
@@ -79,6 +80,9 @@ class SolanaJsonRpcBlockSource:
         source_label: str = "solana-json-rpc",
         transport: RpcTransport | None = None,
         attempts: int = DEFAULT_RPC_ATTEMPTS,
+        max_supported_transaction_version: int = (
+            DEFAULT_MAX_SUPPORTED_TRANSACTION_VERSION
+        ),
     ):
         rpc_url = str(rpc_url or "").strip()
         _safe_rpc_origin(rpc_url)
@@ -86,10 +90,17 @@ class SolanaJsonRpcBlockSource:
             raise ValueError("source_label is required")
         if attempts < 1:
             raise ValueError("attempts must be >= 1")
+        if int(max_supported_transaction_version) < 0:
+            raise ValueError(
+                "max_supported_transaction_version must be >= 0"
+            )
         self.rpc_url = rpc_url
         self.source_label = source_label.strip()
         self.transport = transport or _default_rpc_transport
         self.attempts = int(attempts)
+        self.max_supported_transaction_version = int(
+            max_supported_transaction_version
+        )
         self._request_id = 0
 
     @property
@@ -180,7 +191,9 @@ class SolanaJsonRpcBlockSource:
                     "encoding": "jsonParsed",
                     "transactionDetails": "full",
                     "rewards": False,
-                    "maxSupportedTransactionVersion": 0,
+                    "maxSupportedTransactionVersion": (
+                        self.max_supported_transaction_version
+                    ),
                 },
             ],
         )
@@ -583,6 +596,11 @@ def main() -> int:
         type=int,
         default=DEFAULT_LOOKBACK_SLOTS,
     )
+    parser.add_argument(
+        "--max-supported-transaction-version",
+        type=int,
+        default=DEFAULT_MAX_SUPPORTED_TRANSACTION_VERSION,
+    )
     parser.add_argument("--cutoff-unix", type=int, default=None)
     parser.add_argument("--out", required=True)
     parser.add_argument(
@@ -600,6 +618,9 @@ def main() -> int:
     source = SolanaJsonRpcBlockSource(
         args.rpc_url,
         source_label=args.source_label,
+        max_supported_transaction_version=(
+            args.max_supported_transaction_version
+        ),
     )
     universe = scan_candidate_universe(
         source,
