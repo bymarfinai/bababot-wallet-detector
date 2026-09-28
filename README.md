@@ -40,8 +40,8 @@ BabaBot Market Radar
 |---|---|---|
 | 1 | PASS | Solana-first data foundation |
 | 2 | PASS | Transaction normalization |
-| 3 | NEXT | Position / trade reconstruction |
-| 4 | PLANNED | Historical wallet performance engine |
+| 3 | PASS | Position / trade reconstruction |
+| 4 | NEXT | Historical wallet performance engine |
 | 5 | PLANNED | S1 / S2 / S3 classification |
 | 6 | PLANNED | Meme / explosion hunter discovery |
 | 7 | PLANNED | Qualified wallet registry |
@@ -68,20 +68,29 @@ BabaBot Market Radar
 docs/
 ├── WALLET_STAGE1_DATA_FOUNDATION_Preregistration.md
 ├── WALLET_STAGE1_DATA_FOUNDATION_Result.md
-└── WALLET_STAGE1_DATA_FOUNDATION_Status.txt
+├── WALLET_STAGE1_DATA_FOUNDATION_Status.txt
+├── WALLET_STAGE2_TRANSACTION_NORMALIZATION_Preregistration.md
+├── WALLET_STAGE2_TRANSACTION_NORMALIZATION_Result.md
+├── WALLET_STAGE2_TRANSACTION_NORMALIZATION_Status.txt
+├── WALLET_STAGE3_POSITION_TRADE_RECONSTRUCTION_Preregistration.md
+├── WALLET_STAGE3_POSITION_TRADE_RECONSTRUCTION_Result.md
+└── WALLET_STAGE3_POSITION_TRADE_RECONSTRUCTION_Status.txt
 
 research/
 ├── __init__.py
 ├── wallet_s1_data_foundation.py
-└── wallet_s1_helius_probe.py
+├── wallet_s1_helius_probe.py
+├── wallet_s2_transaction_normalizer.py
+└── wallet_s3_position_reconstruction.py
 
 tests/
 ├── __init__.py
 ├── test_wallet_s1_data_foundation.py
-└── test_wallet_s2_transaction_normalizer.py
+├── test_wallet_s2_transaction_normalizer.py
+└── test_wallet_s3_position_reconstruction.py
 ```
 
-## Run deterministic Stage 1–2 tests
+## Run deterministic Stage 1–3 tests
 
 ```bash
 python -m unittest discover -s tests -v
@@ -100,5 +109,7 @@ python research/wallet_s1_helius_probe.py --wallet <SOLANA_WALLET> --limit 10 --
 
 ```text
 WALLET_STAGE1_DATA_FOUNDATION = PASS
-NEXT = WALLET_STAGE2_TRANSACTION_NORMALIZATION
+WALLET_STAGE2_TRANSACTION_NORMALIZATION = PASS
+WALLET_STAGE3_POSITION_TRADE_RECONSTRUCTION = PASS
+NEXT = WALLET_STAGE4_HISTORICAL_PERFORMANCE_ENGINE
 ```
