@@ -46,8 +46,8 @@ BabaBot Market Radar
 | 6 | PASS | Meme / explosion hunter discovery |
 | 7 | PASS | Qualified wallet registry |
 | 8 | PASS | Live wallet monitor |
-| 8.5 | NEXT | Vercel dashboard / UI |
-| 9 | PLANNED | Smart-money signal + MCD integration |
+| 8.5 | PASS | Vercel dashboard / UI |
+| 9 | NEXT | Smart-money signal + MCD integration |
 | 10 | PLANNED | Validation + ML optimization |
 
 ## Stage 1 frozen principles
@@ -68,6 +68,21 @@ BabaBot Market Radar
 .github/
 └── workflows/
     └── tests.yml
+
+app/
+├── api/
+│   └── dashboard/
+│       └── route.ts
+├── globals.css
+├── layout.tsx
+└── page.tsx
+
+components/
+└── dashboard.tsx
+
+lib/
+├── dashboard-data.ts
+└── dashboard-types.ts
 
 docs/
 ├── WALLET_STAGE1_DATA_FOUNDATION_Preregistration.md
@@ -93,7 +108,10 @@ docs/
 ├── WALLET_STAGE7_QUALIFIED_WALLET_REGISTRY_Status.txt
 ├── WALLET_STAGE8_LIVE_WALLET_MONITOR_Preregistration.md
 ├── WALLET_STAGE8_LIVE_WALLET_MONITOR_Result.md
-└── WALLET_STAGE8_LIVE_WALLET_MONITOR_Status.txt
+├── WALLET_STAGE8_LIVE_WALLET_MONITOR_Status.txt
+├── WALLET_STAGE8_5_VERCEL_DASHBOARD_UI_Preregistration.md
+├── WALLET_STAGE8_5_VERCEL_DASHBOARD_UI_Result.md
+└── WALLET_STAGE8_5_VERCEL_DASHBOARD_UI_Status.txt
 
 research/
 ├── __init__.py
@@ -105,7 +123,8 @@ research/
 ├── wallet_s5_classification.py
 ├── wallet_s6_meme_explosion_hunter.py
 ├── wallet_s7_qualified_registry.py
-└── wallet_s8_live_monitor.py
+├── wallet_s8_live_monitor.py
+└── wallet_s8_5_dashboard_contract.py
 
 tests/
 ├── __init__.py
@@ -116,14 +135,32 @@ tests/
 ├── test_wallet_s5_classification.py
 ├── test_wallet_s6_meme_explosion_hunter.py
 ├── test_wallet_s7_qualified_registry.py
-└── test_wallet_s8_live_monitor.py
+├── test_wallet_s8_live_monitor.py
+└── test_wallet_s8_5_dashboard_contract.py
+
+package.json
+tsconfig.json
+next.config.ts
+next-env.d.ts
+.env.example
 ```
 
-## Run deterministic Stage 1–8 tests
+## Run deterministic Stage 1–8.5 tests
 
 ```bash
 python -m unittest discover -s tests -v
 ```
+
+## Run dashboard locally
+
+```bash
+npm install
+npm run dev
+```
+
+Without `WALLET_DETECTOR_DASHBOARD_URL`, the dashboard clearly runs in **DEMO** mode.
+
+For a live backend, copy the environment template and configure the server-only values documented in `.env.example`.
 
 ## Optional real Helius probe
 
@@ -145,5 +182,6 @@ WALLET_STAGE5_CLASSIFICATION_V1 = PASS
 WALLET_STAGE6_MEME_EXPLOSION_HUNTER = PASS
 WALLET_STAGE7_QUALIFIED_WALLET_REGISTRY = PASS
 WALLET_STAGE8_LIVE_WALLET_MONITOR = PASS
-NEXT = WALLET_STAGE8_5_VERCEL_DASHBOARD_UI
+WALLET_STAGE8_5_VERCEL_DASHBOARD_UI = PASS
+NEXT = WALLET_STAGE9_SMART_MONEY_SIGNAL_MCD_INTEGRATION
 ```
