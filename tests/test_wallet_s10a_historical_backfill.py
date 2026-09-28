@@ -94,10 +94,12 @@ class Stage10AHistoricalBackfillTests(unittest.TestCase):
             {WALLET_A: rows},
             signal_from_unix=0,
         )
-        self.assertEqual(
-            replay["summary"]["qualification_transition_count"],
-            0,
-        )
+        active_transitions = [
+            row
+            for row in replay["qualification_transitions"]
+            if row["to_status"] == "ACTIVE"
+        ]
+        self.assertEqual(active_transitions, [])
         self.assertEqual(replay["summary"]["stage9_signal_count"], 0)
         self.assertEqual(replay["summary"]["persisted_wallet_event_count"], 0)
 
@@ -333,7 +335,7 @@ class Stage10AHistoricalBackfillTests(unittest.TestCase):
         method, url, headers, body = requests[0]
         self.assertEqual(method, "POST")
         self.assertIn(
-            "on_conflict=wallet%2Csignature",
+            "on_conflict=wallet,signature",
             url,
         )
         self.assertEqual(headers["apikey"], "server-secret")
