@@ -164,6 +164,27 @@ class Stage6MemeExplosionHunterTests(unittest.TestCase):
 
         self.assertEqual(len(outcomes), 1)
 
+    def test_same_signature_different_wallets_are_not_deduplicated(self):
+        buys = [
+            buy("same", TOKEN_A, 120, wallet=WALLET),
+            buy("same", TOKEN_A, 130, wallet=OTHER_WALLET),
+        ]
+        events = [{
+            "event_id": "e1",
+            "token": TOKEN_A,
+            "start_time": 100,
+            "trigger_time": 200,
+            "threshold_multiple": "2x",
+            "horizon": "6h",
+        }]
+        matches = match_buys_to_explosion_events(buys, events)
+
+        self.assertEqual(len(matches), 2)
+        self.assertEqual(
+            {row["wallet"] for row in matches},
+            {WALLET, OTHER_WALLET},
+        )
+
     def test_profile_rejects_multiple_wallets(self):
         outcomes = [
             {
