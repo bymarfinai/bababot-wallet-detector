@@ -33,3 +33,19 @@ jobs:
         run: npm run typecheck
       - name: Build dashboard
         run: npm run build
+      - name: Smoke-test production server
+        run: |
+          npm run start > /tmp/wallet-detector-ui.log 2>&1 &
+          APP_PID=$!
+          trap 'kill $APP_PID || true' EXIT
+          for i in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:3000/ > /tmp/dashboard.html; then
+              break
+            fi
+            sleep 1
+          done
+          grep -q "Wallet Detector" /tmp/dashboard.html
+          curl --fail --silent http://127.0.0.1:3000/api/dashboard > /tmp/dashboard.json
+          grep -Eq '"mode":"(DEMO|LIVE|OFFLINE)"' /tmp/dashboard.json
+          grep -q '"registry"' /tmp/dashboard.json
+          grep -q '"windows"' /tmp/dashboard.json
