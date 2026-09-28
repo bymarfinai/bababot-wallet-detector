@@ -1,7 +1,9 @@
 # BabaBot Wallet Detector — Stage 10A-0 Automatic Wallet Universe Discovery
 
 **Date:** 2026-09-28  
-**Status:** PREREGISTERED / NEXT
+**Status:** PREREGISTRATION FROZEN / FULFILLED
+
+Implementation result: **PASS**. See `WALLET_STAGE10A0_AUTOMATIC_WALLET_UNIVERSE_DISCOVERY_Result.md`.
 
 ## Purpose
 
@@ -11,7 +13,7 @@ The final product must **not** depend on a manually maintained list of known suc
 
 Target flow:
 
-\`\`\`text
+```text
 SOLANA BLOCKCHAIN
         ↓
 AUTOMATIC WALLET UNIVERSE DISCOVERY
@@ -30,7 +32,7 @@ monitoring
 Stage-9 smart-money signals
         ↓
 Stage-10 paper trading
-\`\`\`
+```
 
 ## Architectural principle
 
@@ -38,13 +40,13 @@ Solana is the canonical data source.
 
 Provider/indexer services are access layers only:
 
-\`\`\`text
+```text
 Solana blockchain
       ↓
 native RPC / Helius / other verified provider
       ↓
 Wallet Detector
-\`\`\`
+```
 
 A Helius API key may be used for efficient indexed access, but Helius is **not** the source of wallet identity and is **not** an architectural requirement.
 
@@ -54,7 +56,7 @@ The discovery layer must remain provider-neutral where practical.
 
 This work remains inside Stage 10 activation:
 
-\`\`\`text
+```text
 Stage 1–9   = deterministic core already implemented
 Stage 10    = paper-trading engine already implemented
 
@@ -63,7 +65,7 @@ Stage 10A-1 = causal historical backfill + Supabase
 Stage 10B   = real token OHLC ingestion
 Stage 10C   = real empirical A/B/C/D/E replay
 Stage 11    = validation / optimization
-\`\`\`
+```
 
 Stage 10A-0 does not replace or renumber Stages 1–9.
 
@@ -79,11 +81,11 @@ Discovery should collect candidate wallets from factual blockchain activity. Qua
 
 Therefore:
 
-\`\`\`text
+```text
 Discovery ≠ Qualification
 Discovery ≠ Performance ranking
 Discovery ≠ Meme Hunter label
-\`\`\`
+```
 
 ## Candidate discovery policy
 
@@ -107,7 +109,7 @@ Do not build a historical universe only from wallets known today to be successfu
 
 Required principle:
 
-\`\`\`text
+```text
 information available by cutoff T
         ↓
 wallets discoverable by T
@@ -117,7 +119,7 @@ history available by T
 qualification as-of T
         ↓
 signals after qualification
-\`\`\`
+```
 
 This protects Stage 10 from survivor-selection and lookahead leakage.
 
@@ -133,13 +135,13 @@ Manual wallet lists remain supported only for:
 
 They are **not** the intended production discovery mechanism.
 
-The existing Stage-10A historical runner may continue accepting \`--wallet\` / \`--wallets-file\` as an explicit test/bootstrap boundary, but real product activation should feed it from Stage 10A-0 discovery output.
+The existing Stage-10A historical runner may continue accepting `--wallet` / `--wallets-file` as an explicit test/bootstrap boundary, but real product activation should feed it from Stage 10A-0 discovery output.
 
 ## Required output contract
 
 Stage 10A-0 should emit a deterministic candidate-universe artifact containing at minimum:
 
-\`\`\`text
+```text
 wallet
 chain
 discovered_at / cutoff
@@ -151,7 +153,7 @@ evidence transaction/signature references
 activity counts
 universe/version provenance
 deterministic fingerprint
-\`\`\`
+```
 
 The output must preserve mint/wallet identities exactly and avoid symbol-based identity.
 
@@ -176,7 +178,7 @@ Preferred order:
 3. retain native Solana RPC as audit/fallback where feasible;
 4. never couple qualification logic to provider-specific response semantics.
 
-If Helius is used, \`HELIUS_API_KEY\` is a server-side data-access credential only. It is not a wallet private key and does not authorize trading or movement of funds.
+If Helius is used, `HELIUS_API_KEY` is a server-side data-access credential only. It is not a wallet private key and does not authorize trading or movement of funds.
 
 ## Non-goals
 
@@ -206,14 +208,14 @@ Stage 10A-0 can be marked PASS only when:
 
 ## Current checkpoint
 
-\`\`\`text
-WALLET_STAGE10A0_AUTOMATIC_WALLET_UNIVERSE_DISCOVERY = NEXT
+```text
+WALLET_STAGE10A0_AUTOMATIC_WALLET_UNIVERSE_DISCOVERY = PASS
 WALLET_STAGE10A1_CAUSAL_HISTORICAL_BACKFILL_ENGINE = PASS
-WALLET_STAGE10A1_REAL_POPULATION = BLOCKED_BY_DISCOVERY_ACTIVATION
+WALLET_STAGE10A1_REAL_POPULATION = NEXT
 WALLET_STAGE10B_REAL_OHLC = PENDING
 WALLET_STAGE10C_REAL_REPLAY = PENDING
 WALLET_STAGE11 = BLOCKED
-\`\`\`
+```
 
 ## Next implementation
 
