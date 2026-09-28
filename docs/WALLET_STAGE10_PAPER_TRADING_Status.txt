@@ -1,6 +1,7 @@
 WALLET_STAGE10_PAPER_TRADING_ENGINE_PASS
-stage10_tests=31/31
-python_tests_cumulative=170/170
+stage10_engine_tests=31/31
+stage10_replay_activation_tests=12/12
+python_tests_cumulative=182/182
 wallet_detector_only=true
 mcd_dependency=false
 tp_pct=1
@@ -15,6 +16,10 @@ slippage=EXPLICIT_INPUT
 candidate_rules=A,B,C,D,E
 winner_selected=false
 edge_claim=NONE
-empirical_replay=PENDING_REAL_STAGE9_SIGNAL_AND_PRICE_DATA
-next=WALLET_STAGE10_EMPIRICAL_REPLAY_ACTIVATION
+empirical_replay_pipeline=PASS
+empirical_replay_bundle=manifest.json,signals.jsonl,prices.jsonl
+empirical_replay_source_kind=REAL_ONLY
+empirical_replay_dataset_population=PENDING
+real_A_E_comparison=PENDING
+next=POPULATE_REAL_STAGE9_AND_OHLC_REPLAY_BUNDLE
 stage11=BLOCKED_UNTIL_REAL_STAGE10_RESULTS
