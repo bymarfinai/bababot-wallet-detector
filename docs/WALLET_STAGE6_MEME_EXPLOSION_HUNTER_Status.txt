@@ -1,0 +1,16 @@
+WALLET_STAGE6_MEME_EXPLOSION_HUNTER_PASS
+stage1_tests=5/5
+stage2_tests=9/9
+stage3_tests=11/11
+stage4_tests=13/13
+stage5_tests=12/12
+stage6_tests=15/15
+tests_cumulative=65/65
+forward_horizons=6h,24h,72h
+multiples=2x,5x,10x
+false_positive_denominator=eligible_buys
+truncated_history=incomplete_not_miss
+repeatability=buy_and_distinct_token
+explosion_match=wallet_event_collapsed
+label_gate=evidence_profile_only_pending_population_calibration
+next=WALLET_STAGE7_QUALIFIED_WALLET_REGISTRY
