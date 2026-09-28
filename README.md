@@ -42,8 +42,8 @@ BabaBot Market Radar
 | 2 | PASS | Transaction normalization |
 | 3 | PASS | Position / trade reconstruction |
 | 4 | PASS | Historical wallet performance engine |
-| 5 | NEXT | S1 / S2 / S3 classification |
-| 6 | PLANNED | Meme / explosion hunter discovery |
+| 5 | PASS | S1 / S2 / S3 classification |
+| 6 | NEXT | Meme / explosion hunter discovery |
 | 7 | PLANNED | Qualified wallet registry |
 | 8 | PLANNED | Live wallet monitor |
 | 8.5 | PLANNED | Vercel dashboard / UI |
@@ -81,7 +81,10 @@ docs/
 ├── WALLET_STAGE3_POSITION_TRADE_RECONSTRUCTION_Status.txt
 ├── WALLET_STAGE4_HISTORICAL_PERFORMANCE_Preregistration.md
 ├── WALLET_STAGE4_HISTORICAL_PERFORMANCE_Result.md
-└── WALLET_STAGE4_HISTORICAL_PERFORMANCE_Status.txt
+├── WALLET_STAGE4_HISTORICAL_PERFORMANCE_Status.txt
+├── WALLET_STAGE5_CLASSIFICATION_Preregistration.md
+├── WALLET_STAGE5_CLASSIFICATION_Result.md
+└── WALLET_STAGE5_CLASSIFICATION_Status.txt
 
 research/
 ├── __init__.py
@@ -89,17 +92,19 @@ research/
 ├── wallet_s1_helius_probe.py
 ├── wallet_s2_transaction_normalizer.py
 ├── wallet_s3_position_reconstruction.py
-└── wallet_s4_historical_performance.py
+├── wallet_s4_historical_performance.py
+└── wallet_s5_classification.py
 
 tests/
 ├── __init__.py
 ├── test_wallet_s1_data_foundation.py
 ├── test_wallet_s2_transaction_normalizer.py
 ├── test_wallet_s3_position_reconstruction.py
-└── test_wallet_s4_historical_performance.py
+├── test_wallet_s4_historical_performance.py
+└── test_wallet_s5_classification.py
 ```
 
-## Run deterministic Stage 1–4 tests
+## Run deterministic Stage 1–5 tests
 
 ```bash
 python -m unittest discover -s tests -v
@@ -121,5 +126,6 @@ WALLET_STAGE1_DATA_FOUNDATION = PASS
 WALLET_STAGE2_TRANSACTION_NORMALIZATION = PASS
 WALLET_STAGE3_POSITION_TRADE_RECONSTRUCTION = PASS
 WALLET_STAGE4_HISTORICAL_PERFORMANCE_ENGINE = PASS
-NEXT = WALLET_STAGE5_CLASSIFICATION_V1
+WALLET_STAGE5_CLASSIFICATION_V1 = PASS
+NEXT = WALLET_STAGE6_MEME_EXPLOSION_HUNTER
 ```
