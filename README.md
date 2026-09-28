@@ -479,8 +479,26 @@ Deterministic engine and methodology:
 
 ```text
 PASS
-31 / 31 Stage-10 tests
-170 / 170 full Python regression
+31 / 31 Stage-10 engine tests
+```
+
+Empirical replay activation pipeline:
+
+```text
+PASS
+12 / 12 replay-activation tests
+REAL-only manifest validation
+Stage-9 JSONL ingestion
+OHLC JSONL ingestion
+causal coverage preflight
+A–E replay CLI
+deterministic replay fingerprints
+```
+
+Full Python regression:
+
+```text
+182 / 182 PASS
 ```
 
 Real trading-edge evidence:
@@ -489,7 +507,18 @@ Real trading-edge evidence:
 PENDING
 ```
 
-The repository does not yet contain a sufficiently populated real dataset combining:
+A real replay bundle uses:
+
+```text
+<bundle>/
+├── manifest.json
+├── signals.jsonl
+└── prices.jsonl
+```
+
+The bundle contract requires `source_kind = REAL` and rejects DEMO / SYNTHETIC / TEST data for empirical replay.
+
+The repository still does not contain a populated real dataset combining:
 
 ```text
 historical Stage-9 signal snapshots
@@ -499,9 +528,9 @@ causal token OHLC
 explicit real execution-cost assumptions
 ```
 
-Therefore Stage 10 currently proves **backtest correctness**, not profitability.
+Therefore Stage 10 currently proves **backtest + replay-pipeline correctness**, not profitability.
 
-The next work item is still inside Stage 10: populate and replay a real dataset through candidates A–E. Stage 11 must not optimize rules from synthetic unit-test outcomes.
+The next work item remains inside Stage 10: populate a real replay bundle and run candidates A–E. Stage 11 must not optimize rules from synthetic unit-test outcomes.
 
 ## Stage 11 — Validation / Optimization
 
@@ -694,7 +723,9 @@ docs/
 ├── WALLET_STAGE9_SMART_MONEY_SIGNAL_OUTPUT_Status.txt
 ├── WALLET_STAGE10_PAPER_TRADING_Preregistration.md
 ├── WALLET_STAGE10_PAPER_TRADING_Result.md
-└── WALLET_STAGE10_PAPER_TRADING_Status.txt
+├── WALLET_STAGE10_PAPER_TRADING_Status.txt
+├── WALLET_STAGE10_EMPIRICAL_REPLAY_BUNDLE_CONTRACT.md
+└── WALLET_STAGE10_EMPIRICAL_REPLAY_ACTIVATION_Result.md
 
 research/
 ├── __init__.py
@@ -709,7 +740,8 @@ research/
 ├── wallet_s8_live_monitor.py
 ├── wallet_s8_5_dashboard_contract.py
 ├── wallet_s9_smart_money_signal.py
-└── wallet_s10_paper_trading.py
+├── wallet_s10_paper_trading.py
+└── wallet_s10_replay_activation.py
 
 tests/
 ├── __init__.py
@@ -723,7 +755,8 @@ tests/
 ├── test_wallet_s8_live_monitor.py
 ├── test_wallet_s8_5_dashboard_contract.py
 ├── test_wallet_s9_smart_money_signal.py
-└── test_wallet_s10_paper_trading.py
+├── test_wallet_s10_paper_trading.py
+└── test_wallet_s10_replay_activation.py
 
 package.json
 tsconfig.json
@@ -737,6 +770,38 @@ next-env.d.ts
 ```bash
 python -m unittest discover -s tests -v
 ```
+
+
+## Run Stage 10 real-data replay
+
+Bundle contract:
+
+```text
+data/stage10/<dataset_id>/
+├── manifest.json
+├── signals.jsonl
+└── prices.jsonl
+```
+
+Preflight only:
+
+```bash
+python research/wallet_s10_replay_activation.py \
+  --bundle data/stage10/<dataset_id> \
+  --out outputs/stage10/<dataset_id>-preflight.json \
+  --preflight-only
+```
+
+Run A–E:
+
+```bash
+python research/wallet_s10_replay_activation.py \
+  --bundle data/stage10/<dataset_id> \
+  --out outputs/stage10/<dataset_id>-result.json
+```
+
+The empirical runner accepts `source_kind=REAL` only.
+
 
 ## Run dashboard locally
 
@@ -773,9 +838,11 @@ WALLET_STAGE8_LIVE_WALLET_MONITOR_CORE = PASS
 WALLET_STAGE8_5_VERCEL_DASHBOARD_UI = PASS
 WALLET_STAGE9_SMART_MONEY_SIGNAL_OUTPUT = PASS
 WALLET_STAGE10_PAPER_TRADING_ENGINE = PASS
-WALLET_STAGE10_EMPIRICAL_REPLAY = PENDING_REAL_DATA
+WALLET_STAGE10_EMPIRICAL_REPLAY_PIPELINE = PASS
+WALLET_STAGE10_EMPIRICAL_REPLAY_DATASET = PENDING_REAL_DATA
+WALLET_STAGE10_REAL_A_E_COMPARISON = PENDING
 
-NEXT = WALLET_STAGE10_EMPIRICAL_REPLAY_ACTIVATION
+NEXT = POPULATE_REAL_STAGE9_AND_OHLC_REPLAY_BUNDLE
 
 FUTURE AFTER REAL STAGE10 RESULTS:
 WALLET_STAGE11_VALIDATION_OPTIMIZATION_AND_S4_S5
