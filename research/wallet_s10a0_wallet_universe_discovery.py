@@ -470,7 +470,6 @@ def verify_candidate_universe(universe: dict[str, Any]) -> bool:
 
     scan = universe.get("scan") or {}
     source = universe.get("source") or {}
-    blocks_placeholder = None
     records = list(universe.get("records") or [])
 
     seen_wallets: set[str] = set()
@@ -506,7 +505,6 @@ def verify_candidate_universe(universe: dict[str, Any]) -> bool:
         "requested_end_slot"
     ) is None:
         raise ValueError("candidate universe missing scan bounds")
-    _ = blocks_placeholder
     return True
 
 
