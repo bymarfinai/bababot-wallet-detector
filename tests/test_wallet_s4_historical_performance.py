@@ -129,6 +129,8 @@ class Stage4HistoricalPerformanceTests(unittest.TestCase):
         self.assertTrue(metrics["net_metrics_complete"])
         self.assertEqual(metrics["net_total_realized_pnl_quote"], "4")
         self.assertEqual(result["usd_comparable"]["net_total_realized_pnl_usd_stable"], "4")
+        self.assertEqual(result["usd_comparable"]["net_median_roi_pct"], "2")
+        self.assertEqual(result["usd_comparable"]["net_win_rate_pct"], "50")
 
     def test_missing_fee_conversion_keeps_net_total_unavailable(self):
         result = compute_wallet_performance([
