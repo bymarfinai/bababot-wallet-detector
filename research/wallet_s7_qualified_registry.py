@@ -398,6 +398,24 @@ def build_registry_snapshot(
     }
 
 
+def verify_registry_snapshot(snapshot: dict[str, Any]) -> bool:
+    """Verify the complete Stage-7 snapshot, including every record fingerprint."""
+    if str(snapshot.get("version") or "") != STAGE7_VERSION:
+        raise ValueError("unsupported registry snapshot version")
+
+    snapshot_id = str(snapshot.get("snapshot_id") or "").strip()
+    if not snapshot_id:
+        raise ValueError("registry snapshot_id is required")
+
+    expected = build_registry_snapshot(
+        snapshot.get("records") or [],
+        snapshot_id=snapshot_id,
+    )
+    if snapshot != expected:
+        raise ValueError("registry snapshot integrity mismatch")
+    return True
+
+
 def upsert_registry_records(
     existing_records: Iterable[dict[str, Any]],
     new_records: Iterable[dict[str, Any]],
