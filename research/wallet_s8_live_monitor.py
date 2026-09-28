@@ -124,6 +124,8 @@ def live_event_to_persistence_row(event: dict[str, Any]) -> dict[str, Any]:
         "usd_notional": event.get("usd_notional"),
         "primary_segment": event.get("primary_segment"),
         "qualifying_segments": list(event.get("qualifying_segments") or []),
+        "meme_hunter_evidence": event.get("meme_hunter_evidence"),
+        "special_labels": dict(event.get("special_labels") or {}),
         "registry_snapshot_id": event.get("registry_snapshot_id"),
         "registry_record_fingerprint": event.get("registry_record_fingerprint"),
         "payload": dict(event),
@@ -375,6 +377,10 @@ class LiveWalletMonitor:
                 "qualifying_segments": list(
                     record.get("qualifying_segments") or []
                 ),
+                "meme_hunter_evidence": record.get(
+                    "meme_hunter_evidence"
+                ),
+                "special_labels": dict(record.get("special_labels") or {}),
                 "received_at": received_at,
             }
             self._seen_keys.add(key)
