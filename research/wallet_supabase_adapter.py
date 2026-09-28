@@ -89,6 +89,97 @@ def _registry_record_rows(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
+def candidate_universe_rows(
+    universe: dict[str, Any],
+) -> tuple[
+    dict[str, Any],
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+]:
+    if str(universe.get("version") or "") != "wallet-s10a0-v1":
+        raise ValueError("unsupported Stage-10A-0 universe version")
+    fingerprint = str(universe.get("universe_fingerprint") or "")
+    if not fingerprint:
+        raise ValueError("candidate universe requires fingerprint")
+
+    source = universe.get("source") or {}
+    scan = universe.get("scan") or {}
+    snapshot_row = {
+        "universe_fingerprint": fingerprint,
+        "version": universe["version"],
+        "chain": universe.get("chain") or "solana",
+        "source_kind": source.get("kind"),
+        "source_label": source.get("label"),
+        "source_origin": source.get("origin"),
+        "requested_start_slot": int(scan["requested_start_slot"]),
+        "requested_end_slot": int(scan["requested_end_slot"]),
+        "cutoff_unix": (
+            None
+            if scan.get("cutoff_unix") is None
+            else int(scan["cutoff_unix"])
+        ),
+        "scanned_block_count": int(
+            scan.get("scanned_block_count") or 0
+        ),
+        "transaction_count": int(scan.get("transaction_count") or 0),
+        "eligible_transaction_count": int(
+            scan.get("eligible_transaction_count") or 0
+        ),
+        "candidate_wallet_count": int(
+            universe.get("candidate_wallet_count") or 0
+        ),
+        "source_payload": universe,
+    }
+
+    candidate_rows: list[dict[str, Any]] = []
+    evidence_rows: list[dict[str, Any]] = []
+    for record in universe.get("records") or []:
+        wallet = str(record.get("wallet") or "")
+        if not wallet:
+            raise ValueError("candidate record requires wallet")
+        candidate_rows.append({
+            "universe_fingerprint": fingerprint,
+            "wallet": wallet,
+            "record_fingerprint": record["record_fingerprint"],
+            "chain": record.get("chain") or "solana",
+            "discovered_at_unix": int(record["discovered_at"]),
+            "first_observed_at_unix": int(record["first_observed_at"]),
+            "last_observed_at_unix": int(record["last_observed_at"]),
+            "first_observed_slot": int(record["first_observed_slot"]),
+            "last_observed_slot": int(record["last_observed_slot"]),
+            "activity_count": int(record.get("activity_count") or 0),
+            "distinct_changed_mint_count": int(
+                record.get("distinct_changed_mint_count") or 0
+            ),
+            "evidence_signature_count": int(
+                record.get("evidence_signature_count") or 0
+            ),
+            "discovery_source": record.get("discovery_source"),
+            "discovery_reason": record.get("discovery_reason"),
+            "changed_mints": list(record.get("changed_mints") or []),
+            "evidence_signatures": list(
+                record.get("evidence_signatures") or []
+            ),
+            "source_payload": record,
+        })
+        for evidence in record.get("evidence") or []:
+            evidence_rows.append({
+                "universe_fingerprint": fingerprint,
+                "wallet": wallet,
+                "signature": evidence["signature"],
+                "slot": int(evidence["slot"]),
+                "block_time_unix": int(evidence["block_time"]),
+                "discovery_source": evidence.get("discovery_source"),
+                "discovery_reason": evidence.get("discovery_reason"),
+                "changed_mints": list(
+                    evidence.get("changed_mints") or []
+                ),
+                "evidence_payload": evidence,
+            })
+
+    return snapshot_row, candidate_rows, evidence_rows
+
+
 def raw_wallet_transaction_row(
     wallet: str,
     tx: dict[str, Any],
@@ -405,6 +496,32 @@ class SupabaseRestClient:
             )
             count += len(batch)
         return count
+
+    def persist_candidate_universe(
+        self,
+        universe: dict[str, Any],
+    ) -> dict[str, int]:
+        snapshot, candidates, evidence = candidate_universe_rows(universe)
+        snapshot_count = self.upsert_rows(
+            "wallet_universe_snapshots",
+            [snapshot],
+            on_conflict="universe_fingerprint",
+        )
+        candidate_count = self.upsert_rows(
+            "wallet_universe_candidates",
+            candidates,
+            on_conflict="universe_fingerprint,wallet",
+        )
+        evidence_count = self.upsert_rows(
+            "wallet_universe_evidence",
+            evidence,
+            on_conflict="universe_fingerprint,wallet,signature",
+        )
+        return {
+            "wallet_universe_snapshot_rows": snapshot_count,
+            "wallet_universe_candidate_rows": candidate_count,
+            "wallet_universe_evidence_rows": evidence_count,
+        }
 
     def persist_historical_raw(
         self,
