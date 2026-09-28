@@ -137,8 +137,16 @@ def extract_wallet_token_deltas(tx: dict[str, Any], wallet: str) -> list[TokenDe
 
     result: list[TokenDelta] = []
     for mint in sorted(set(before) | set(after)):
-        pre_amount, pre_decimals = before.get(mint, (0, after[mint][1]))
-        post_amount, post_decimals = after.get(mint, (0, pre_decimals))
+        if mint in before:
+            pre_amount, pre_decimals = before[mint]
+        else:
+            pre_amount, pre_decimals = 0, after[mint][1]
+
+        if mint in after:
+            post_amount, post_decimals = after[mint]
+        else:
+            post_amount, post_decimals = 0, pre_decimals
+
         if pre_decimals != post_decimals:
             raise ValueError(f"inconsistent decimals for mint {mint}")
         delta = post_amount - pre_amount
