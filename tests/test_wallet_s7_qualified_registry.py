@@ -8,7 +8,7 @@ from research.wallet_s7_qualified_registry import (
 )
 
 WALLET = "86xCnPeV69n6t3DnyGvkKobf9FdN2H9oiVDdaMpo2MMY"
-OTHER_WALLET = "7YWHMfk9JZe0LMVx7uL8b2NBG7oAqZ3M5Gx8E6JxSk3N"
+OTHER_WALLET = "22222222222222222222222222222222"
 
 
 def classification(
