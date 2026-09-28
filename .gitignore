@@ -3,6 +3,12 @@ __pycache__/
 .venv/
 .env
 .env.*
+!.env.example
 wallet_probe.json
 *.log
-node_modules/\n.next/\n.vercel/\n*.tsbuildinfo\n!.env.example
+node_modules/
+.next/
+.vercel/
+*.tsbuildinfo
+data/stage10/
+outputs/stage10/
