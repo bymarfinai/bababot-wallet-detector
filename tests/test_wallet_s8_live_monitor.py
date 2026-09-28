@@ -74,7 +74,38 @@ def classification(wallet, *, qualified=True, segments=None, primary="S1"):
     }
 
 
-def registry_record(wallet, *, qualified=True, segments=None, primary="S1"):
+def meme_profile(wallet):
+    return {
+        "version": "wallet-s6-v1",
+        "wallet": wallet,
+        "profile_available": True,
+        "label_status": "EVIDENCE_PROFILE_ONLY",
+        "input_buy_count": 12,
+        "evaluated_buy_count": 10,
+        "distinct_tokens_bought": 6,
+        "buckets": {},
+    }
+
+
+def explosion_profile(wallet):
+    return {
+        "version": "wallet-s6-v1",
+        "wallet": wallet,
+        "matched_explosion_events": 3,
+        "matched_distinct_tokens": 2,
+        "median_first_entry_lead_seconds": 7200,
+        "median_last_entry_lead_seconds": 1800,
+    }
+
+
+def registry_record(
+    wallet,
+    *,
+    qualified=True,
+    segments=None,
+    primary="S1",
+    with_meme=False,
+):
     return build_registry_record(
         wallet=wallet,
         performance=performance(wallet),
@@ -84,6 +115,8 @@ def registry_record(wallet, *, qualified=True, segments=None, primary="S1"):
             segments=segments,
             primary=primary,
         ),
+        meme_profile=meme_profile(wallet) if with_meme else None,
+        explosion_profile=explosion_profile(wallet) if with_meme else None,
     )
 
 
@@ -262,6 +295,45 @@ class Stage8LiveMonitorTests(unittest.TestCase):
         self.assertEqual(row["qualifying_segments"], ["S1", "S2"])
         self.assertEqual(row["received_at"], 1002)
         self.assertEqual(row["idempotency_key"], f"{WALLET_A}:sig-a")
+
+    def test_live_event_carries_stage6_specialty_evidence(self):
+        record = registry_record(
+            WALLET_A,
+            segments=["S1", "S2"],
+            primary="S2",
+            with_meme=True,
+        )
+        monitor = LiveWalletMonitor(snapshot(record, snapshot_id="meme-live"))
+        result = monitor.ingest_rpc_transaction(
+            swap_tx(
+                "meme-evidence",
+                1000,
+                [(WALLET_A, "BUY", TOKEN_A, 100, 10)],
+            )
+        )
+        row = result["accepted_events"][0]
+
+        self.assertEqual(
+            row["special_labels"]["meme_hunter"],
+            "EVIDENCE_PROFILE_ONLY",
+        )
+        self.assertTrue(
+            row["meme_hunter_evidence"]["evidence_profile_available"]
+        )
+        self.assertEqual(
+            row["meme_hunter_evidence"]["matched_explosion_events"],
+            3,
+        )
+
+        persisted = live_event_to_persistence_row(row)
+        self.assertEqual(
+            persisted["special_labels"]["meme_hunter"],
+            "EVIDENCE_PROFILE_ONLY",
+        )
+        self.assertEqual(
+            persisted["meme_hunter_evidence"]["matched_distinct_tokens"],
+            2,
+        )
 
     def test_one_transaction_can_emit_events_for_two_active_wallets(self):
         tx = swap_tx(
