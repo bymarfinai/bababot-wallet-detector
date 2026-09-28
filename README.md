@@ -69,8 +69,8 @@ No consumer is required for Wallet Detector itself to work.
 | 7 | PASS | Qualified wallet registry |
 | 8 | PASS CORE | Live wallet monitor core |
 | 8.5 | PASS | Vercel dashboard / UI |
-| 9 | NEXT | Smart-money signal output layer |
-| 10 | PLANNED | Wallet-only paper trading |
+| 9 | PASS | Smart-money signal output layer |
+| 10 | NEXT | Wallet-only paper trading |
 | 11 | PLANNED | Validation + rule optimization + S4/S5 calibration |
 | 12 | PLANNED | Optional ML ranker / probability layer |
 
@@ -322,7 +322,7 @@ Whale must not be treated as a quality tier.
 
 ## Stage 9 — Smart-Money Signal Output
 
-Stage 9 should convert factual Stage-8 wallet activity into an external signal contract.
+Stage 9 converts factual Stage-8 wallet activity into an external signal contract.
 
 Inputs may include:
 
@@ -338,17 +338,42 @@ freshness
 5m / 15m / 1H persistence
 ```
 
-Initial descriptive states:
+Implemented descriptive states:
 
 ```text
 ACCUMULATION
 DISTRIBUTION
-BALANCED / NEUTRAL
+NEUTRAL
+```
+
+Current V1 output includes:
+
+```text
+freshest active basis window
+qualified BUY / SELL wallet breadth
+overlapping performance-tier participation
+validated USD flow with COMPLETE / PARTIAL / UNAVAILABLE coverage
+exact freshness age + 5m / 15m / 1H bucket
+rolling-window state agreement
+non-overlapping 0–5m / 5–15m / 15–60m persistence bands
+Stage-6 Meme Hunter evidence
+event-time Stage-7 registry provenance
+deterministic signal + snapshot fingerprints
+JSON handoff
+```
+
+Rolling-window agreement is intentionally separated from true temporal persistence. A single recent event can appear in all nested rolling windows, so Stage 9 only claims 15m / 1H directional persistence when matching activity exists in the corresponding non-overlapping historical time bands.
+
+Frozen V1 policy:
+
+```text
+strength_score = null
+entry_rule = null
 ```
 
 Do not invent an arbitrary 0–100 strength score before paper-trading evidence exists.
 
-The output should be consumable independently through API / JSON / another small handoff boundary.
+The output is consumable independently through JSON / a small external handoff boundary. Market Radar / MCD remains an optional future consumer rather than a dependency.
 
 ## Stage 10 — Wallet-Only Paper Trading
 
@@ -610,7 +635,10 @@ docs/
 ├── WALLET_STAGE8_LIVE_WALLET_MONITOR_Status.txt
 ├── WALLET_STAGE8_5_VERCEL_DASHBOARD_UI_Preregistration.md
 ├── WALLET_STAGE8_5_VERCEL_DASHBOARD_UI_Result.md
-└── WALLET_STAGE8_5_VERCEL_DASHBOARD_UI_Status.txt
+├── WALLET_STAGE8_5_VERCEL_DASHBOARD_UI_Status.txt
+├── WALLET_STAGE9_SMART_MONEY_SIGNAL_OUTPUT_Preregistration.md
+├── WALLET_STAGE9_SMART_MONEY_SIGNAL_OUTPUT_Result.md
+└── WALLET_STAGE9_SMART_MONEY_SIGNAL_OUTPUT_Status.txt
 
 research/
 ├── __init__.py
@@ -623,7 +651,8 @@ research/
 ├── wallet_s6_meme_explosion_hunter.py
 ├── wallet_s7_qualified_registry.py
 ├── wallet_s8_live_monitor.py
-└── wallet_s8_5_dashboard_contract.py
+├── wallet_s8_5_dashboard_contract.py
+└── wallet_s9_smart_money_signal.py
 
 tests/
 ├── __init__.py
@@ -635,7 +664,8 @@ tests/
 ├── test_wallet_s6_meme_explosion_hunter.py
 ├── test_wallet_s7_qualified_registry.py
 ├── test_wallet_s8_live_monitor.py
-└── test_wallet_s8_5_dashboard_contract.py
+├── test_wallet_s8_5_dashboard_contract.py
+└── test_wallet_s9_smart_money_signal.py
 
 package.json
 tsconfig.json
@@ -644,7 +674,7 @@ next-env.d.ts
 .env.example
 ```
 
-## Run deterministic Stage 1–8.5 tests
+## Run deterministic Stage 1–9 tests
 
 ```bash
 python -m unittest discover -s tests -v
@@ -683,11 +713,11 @@ WALLET_STAGE6_MEME_EXPLOSION_HUNTER_V1 = PASS
 WALLET_STAGE7_QUALIFIED_WALLET_REGISTRY = PASS
 WALLET_STAGE8_LIVE_WALLET_MONITOR_CORE = PASS
 WALLET_STAGE8_5_VERCEL_DASHBOARD_UI = PASS
+WALLET_STAGE9_SMART_MONEY_SIGNAL_OUTPUT = PASS
 
-NEXT = WALLET_STAGE9_SMART_MONEY_SIGNAL_OUTPUT
+NEXT = WALLET_STAGE10_WALLET_ONLY_PAPER_TRADING
 
 FUTURE:
-WALLET_STAGE10_WALLET_ONLY_PAPER_TRADING
 WALLET_STAGE11_VALIDATION_OPTIMIZATION_AND_S4_S5
 WALLET_STAGE12_OPTIONAL_ML_RANKER
 ```
