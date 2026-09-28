@@ -324,6 +324,7 @@ def compute_wallet_performance(
     usd_pnls = [_d(row["realized_pnl_quote"]) for row in usd_episodes]
     usd_net_rows = [_fee_adjusted_values(row) for row in usd_episodes]
     usd_net_pnls = [row[0] for row in usd_net_rows if row[0] is not None]
+    usd_net_rois = [row[1] for row in usd_net_rows if row[1] is not None]
     usd_net_complete = bool(usd_episodes) and len(usd_net_pnls) == len(usd_episodes)
 
     close_times = [
@@ -395,6 +396,16 @@ def compute_wallet_performance(
             "net_metrics_complete": usd_net_complete,
             "net_total_realized_pnl_usd_stable": (
                 _s(sum(usd_net_pnls, ZERO)) if usd_net_complete else None
+            ),
+            "net_median_roi_pct": _s(_median(usd_net_rois)),
+            "net_win_rate_pct": (
+                _s(
+                    Decimal(sum(1 for x in usd_net_pnls if x > ZERO))
+                    / Decimal(len(usd_net_pnls))
+                    * Decimal("100")
+                )
+                if usd_net_pnls
+                else None
             ),
             "net_profit_factor": (
                 _profit_factor(usd_net_pnls) if usd_net_pnls else None
