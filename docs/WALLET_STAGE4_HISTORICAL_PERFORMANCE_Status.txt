@@ -1,0 +1,12 @@
+WALLET_STAGE4_HISTORICAL_PERFORMANCE_ENGINE_PASS
+stage1_tests=5/5
+stage2_tests=9/9
+stage3_tests=11/11
+stage4_tests=13/13
+tests_inventory=38
+metric_basis=clean_closed_episodes
+monetary_aggregation=quote_specific
+usd_bucket=verified_stable_quotes_only
+net_fee_policy=no_guess
+minimum_sample_gate=50
+next=WALLET_STAGE5_CLASSIFICATION_V1
