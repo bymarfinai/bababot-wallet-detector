@@ -348,6 +348,31 @@ class Stage10AHistoricalBackfillTests(unittest.TestCase):
             "sig",
         )
 
+    def test_supabase_upsert_batches_large_payloads(self):
+        requests = []
+
+        def transport(method, url, headers, body):
+            requests.append(json.loads(body.decode("utf-8")))
+            return 201, b""
+
+        client = SupabaseRestClient(
+            url="https://project.supabase.co",
+            secret_key="server-secret",
+            transport=transport,
+            batch_size=2,
+        )
+        count = client.upsert_rows(
+            "wallet_events",
+            [
+                {"wallet": WALLET_A, "signature": "a"},
+                {"wallet": WALLET_A, "signature": "b"},
+                {"wallet": WALLET_A, "signature": "c"},
+            ],
+            on_conflict="wallet,signature",
+        )
+        self.assertEqual(count, 3)
+        self.assertEqual([len(batch) for batch in requests], [2, 1])
+
     def test_supabase_client_rejects_non_https_url(self):
         with self.assertRaises(ValueError):
             SupabaseRestClient(
