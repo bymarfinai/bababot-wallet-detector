@@ -9,6 +9,8 @@ from research.wallet_s10a_historical_backfill import (
 )
 from research.wallet_supabase_adapter import (
     SupabaseRestClient,
+    normalized_history_row,
+    raw_wallet_transaction_row,
     signal_rows,
     signal_snapshot_row,
     wallet_event_row,
@@ -256,6 +258,26 @@ class Stage10AHistoricalBackfillTests(unittest.TestCase):
         )
         self.assertEqual(len(normalized[WALLET_A]), 1)
         self.assertEqual(report["normalization_error_count"], 1)
+
+    def test_raw_history_mapping_preserves_provider_payload(self):
+        tx = raw_tx("raw-sig", 1234)
+        row = raw_wallet_transaction_row(WALLET_A, tx)
+        self.assertEqual(row["wallet"], WALLET_A)
+        self.assertEqual(row["signature"], "raw-sig")
+        self.assertEqual(row["block_time_unix"], 1234)
+        self.assertEqual(row["source"], "helius_gtfa")
+        self.assertEqual(row["raw_payload"], tx)
+
+    def test_normalized_history_mapping_preserves_prequalification_event(self):
+        event = normalized_swap("norm-sig", 1234, "BUY")
+        row = normalized_history_row(event)
+        self.assertEqual(row["wallet"], WALLET_A)
+        self.assertEqual(row["signature"], "norm-sig")
+        self.assertEqual(row["stage2_version"], "wallet-s2-v1")
+        self.assertEqual(row["event_type"], "SWAP")
+        self.assertEqual(row["side"], "BUY")
+        self.assertEqual(row["execution_price"], "1")
+        self.assertEqual(row["normalized_payload"], event)
 
     def test_wallet_event_row_maps_stage8_payload(self):
         event = {
