@@ -57,13 +57,29 @@ For every wallet:
 
 This prevents a direct qualification lookahead leak.
 
-## Historical universe warning
+## Historical universe policy
 
-The wallet identities themselves are external input.
+The current Stage-10A-1 runner accepts explicit wallet identities as a **test/bootstrap interface**, but this is not the final production discovery design.
 
-If the universe is selected only from wallets known to be successful today, the replay still has survivor-selection bias even though each wallet's qualification timeline is reconstructed causally.
+Production activation is now gated by **Stage 10A-0 — Automatic Wallet Universe Discovery**.
 
-Such results must remain research-only until wallet-universe provenance is suitable for validation.
+The production input should be a deterministic candidate-wallet universe discovered from real Solana activity with as-of provenance.
+
+If a universe is selected only from wallets known today to be successful, the replay still has survivor-selection bias even though each wallet's qualification timeline is reconstructed causally. Such results remain research-only.
+
+Required production flow:
+
+```text
+Solana blockchain
+        ↓
+Stage 10A-0 automatic wallet discovery
+        ↓
+causal candidate universe
+        ↓
+Stage 10A-1 historical qualification/backfill
+```
+
+Manual wallet lists remain permitted for unit tests, debugging, provider probes, and controlled bootstrap comparisons only.
 
 ## Stage-6 policy
 
@@ -140,20 +156,26 @@ Latest full Python regression:
 
 ## Activation boundary
 
-The code path is ready, but a real backfill has not been executed from this session because these runtime inputs are not currently available to the runner:
+The Stage-10A-1 code path and Supabase schema are ready.
+
+Real production population is intentionally **not** activated from a hand-picked wallet list. The next required activation step is:
 
 ```text
-HELIUS_API_KEY
-real wallet universe
-WALLET_SUPABASE_SECRET_KEY (for direct Python persistence)
+Stage 10A-0 — Automatic Wallet Universe Discovery
 ```
 
-The Supabase project and schema themselves are already live.
+After Stage 10A-0 produces a causal candidate universe, that output feeds this Stage-10A-1 backfill engine directly.
 
-Next after real Stage-10A population:
+Provider credentials depend on the chosen transport. If Helius is used, `HELIUS_API_KEY` is required for Helius access; native RPC or another verified provider may use a different access model.
+
+The server-side Supabase secret remains required for direct Python persistence.
+
+Next sequence:
 
 ```text
-Stage 10B — real OHLC ingestion
-Stage 10C — empirical A/B/C/E replay
-Rule D only after causal Stage-6 reconstruction
+Stage 10A-0 — automatic wallet universe discovery
+Stage 10A-1 — real causal backfill population
+Stage 10B   — real OHLC ingestion
+Stage 10C   — empirical A/B/C/E replay
+Rule D      — only after causal Stage-6 reconstruction
 ```
