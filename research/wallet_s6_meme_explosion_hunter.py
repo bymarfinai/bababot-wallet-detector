@@ -47,7 +47,7 @@ def _median_int(values: list[int]) -> int | None:
 
 def _valid_buys(buys: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    seen_signatures: set[str] = set()
+    seen_signatures: set[tuple[str, str]] = set()
 
     for row in buys:
         if str(row.get("event_type") or "") != "SWAP":
@@ -60,10 +60,12 @@ def _valid_buys(buys: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
 
         signature = str(row.get("signature") or "")
+        wallet = str(row.get("wallet") or "")
         if signature:
-            if signature in seen_signatures:
+            dedupe_key = (wallet, signature)
+            if dedupe_key in seen_signatures:
                 continue
-            seen_signatures.add(signature)
+            seen_signatures.add(dedupe_key)
         rows.append(dict(row))
 
     return sorted(
