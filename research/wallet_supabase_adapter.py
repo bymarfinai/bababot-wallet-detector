@@ -353,24 +353,39 @@ class SupabaseRestClient:
             count += len(batch)
         return count
 
-    def persist_registry_snapshot(
+    def persist_registry_snapshots(
         self,
-        snapshot: dict[str, Any],
+        snapshots: Iterable[dict[str, Any]],
     ) -> dict[str, int]:
+        materialized = [dict(row) for row in snapshots]
+        snapshot_rows = [
+            _registry_snapshot_row(row) for row in materialized
+        ]
+        record_rows = [
+            record
+            for snapshot in materialized
+            for record in _registry_record_rows(snapshot)
+        ]
         snapshot_count = self.upsert_rows(
             "registry_snapshots",
-            [_registry_snapshot_row(snapshot)],
+            snapshot_rows,
             on_conflict="snapshot_id",
         )
         record_count = self.upsert_rows(
             "wallet_registry",
-            _registry_record_rows(snapshot),
+            record_rows,
             on_conflict="snapshot_id,wallet",
         )
         return {
             "registry_snapshot_rows": snapshot_count,
             "wallet_registry_rows": record_count,
         }
+
+    def persist_registry_snapshot(
+        self,
+        snapshot: dict[str, Any],
+    ) -> dict[str, int]:
+        return self.persist_registry_snapshots([snapshot])
 
     def persist_wallet_events(
         self,
