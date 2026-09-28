@@ -628,13 +628,9 @@ def persist_stage10a_replay(
     client: SupabaseRestClient,
     replay: dict[str, Any],
 ) -> dict[str, Any]:
-    registry_snapshot_rows = 0
-    wallet_registry_rows = 0
-    for snapshot in replay.get("registry_snapshots") or []:
-        result = client.persist_registry_snapshot(snapshot)
-        registry_snapshot_rows += result["registry_snapshot_rows"]
-        wallet_registry_rows += result["wallet_registry_rows"]
-
+    registry_result = client.persist_registry_snapshots(
+        replay.get("registry_snapshots") or []
+    )
     wallet_event_rows = client.persist_wallet_events(
         replay.get("wallet_events") or []
     )
@@ -642,8 +638,7 @@ def persist_stage10a_replay(
         replay.get("signal_snapshots") or []
     )
     return {
-        "registry_snapshot_rows": registry_snapshot_rows,
-        "wallet_registry_rows": wallet_registry_rows,
+        **registry_result,
         "wallet_event_rows": wallet_event_rows,
         **signal_result,
     }
