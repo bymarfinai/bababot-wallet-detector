@@ -62,7 +62,7 @@ jobs:
           python-version: "3.12"
       - name: Discover wallets from real Solana blocks
         run: |
-          python research/wallet_s10a0_wallet_universe_discovery.py \
+          python -m research.wallet_s10a0_wallet_universe_discovery \
             --lookback-slots 2 \
             --require-candidates \
             --out /tmp/stage10a0-mainnet-smoke.json
