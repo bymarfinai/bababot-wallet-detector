@@ -1,0 +1,107 @@
+name: Wallet History Population
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/wallet-history-population.yml"
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      history_as_of_unix: \${{ steps.freeze.outputs.history_as_of_unix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Discover live candidate universe
+        run: |
+          python -m research.wallet_s10a0_wallet_universe_discovery \
+            --lookback-slots 2 \
+            --require-candidates \
+            --out /tmp/stage10a0.json
+      - name: Refine to trader candidates
+        run: |
+          python -m research.wallet_s10a1_candidate_refinement \
+            --universe-file /tmp/stage10a0.json \
+            --require-trader-candidates \
+            --out /tmp/stage10a1a.json
+      - name: Freeze population timestamp
+        id: freeze
+        run: |
+          HISTORY_AS_OF=$(date +%s)
+          echo "history_as_of_unix=$HISTORY_AS_OF" >> "$GITHUB_OUTPUT"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          payload = json.loads(Path("/tmp/stage10a1a.json").read_text())
+          refinement = payload["refinement"]
+          print(json.dumps({
+              "refinement_fingerprint": refinement["refinement_fingerprint"],
+              "activity_candidate_wallet_count": refinement[
+                  "activity_candidate_wallet_count"
+              ],
+              "trader_candidate_wallet_count": refinement[
+                  "trader_candidate_wallet_count"
+              ],
+              "meme_buy_candidate_wallet_count": refinement[
+                  "meme_buy_candidate_wallet_count"
+              ],
+          }, indent=2))
+          PY
+      - name: Upload frozen refinement
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage10a1b-frozen-refinement
+          path: /tmp/stage10a1a.json
+          retention-days: 14
+
+  backfill:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Download frozen refinement
+        uses: actions/download-artifact@v4
+        with:
+          name: stage10a1b-frozen-refinement
+          path: /tmp/input
+      - name: Backfill shard from real Solana history
+        run: |
+          mkdir -p "/tmp/stage10a1b/shard-\${{ matrix.shard }}"
+          python -m research.wallet_s10a1b_real_historical_backfill \
+            --refinement-file /tmp/input/stage10a1a.json \
+            --provider solana-rpc \
+            --history-as-of-unix "\${{ needs.prepare.outputs.history_as_of_unix }}" \
+            --shard-count 8 \
+            --shard-index "\${{ matrix.shard }}" \
+            --signature-page-limit 1000 \
+            --max-signature-pages-per-wallet 5 \
+            --transaction-batch-size 1 \
+            --evidence-only \
+            --evidence-dir "/tmp/stage10a1b/shard-\${{ matrix.shard }}/evidence" \
+            --dry-run \
+            --out "/tmp/stage10a1b/shard-\${{ matrix.shard }}/result.json"
+      - name: Upload shard evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage10a1b-shard-\${{ matrix.shard }}
+          path: /tmp/stage10a1b/shard-\${{ matrix.shard }}
+          if-no-files-found: warn
+          retention-days: 14
