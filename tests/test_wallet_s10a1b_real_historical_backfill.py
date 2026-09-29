@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from research.wallet_s2_transaction_normalizer import USDC_MINT
 from research.wallet_s10a0_wallet_universe_discovery import (
@@ -315,6 +316,34 @@ class Stage10A1BRealBackfillTests(unittest.TestCase):
             [tx["transaction"]["signatures"][0] for tx in raw[WALLET_A]],
             ["old"],
         )
+
+    def test_scalar_http_429_has_single_retry_loop(self):
+        calls = 0
+
+        def transport(method, url, headers, body):
+            nonlocal calls
+            calls += 1
+            payload = json.loads(body.decode("utf-8"))
+            if calls < 3:
+                return 429, b"rate limited"
+            return 200, json.dumps({
+                "jsonrpc": "2.0",
+                "id": payload["id"],
+                "result": 0,
+            }).encode("utf-8")
+
+        source = SolanaWalletHistoryRpc(
+            "https://rpc.example/",
+            transport=transport,
+            attempts=3,
+        )
+        with patch(
+            "research.wallet_s10a1b_real_historical_backfill.time.sleep"
+        ) as sleeper:
+            self.assertEqual(source.first_available_block(), 0)
+
+        self.assertEqual(calls, 3)
+        self.assertEqual(sleeper.call_count, 2)
 
     def test_transaction_batch_rate_limit_falls_back_to_scalar_rpc(self):
         batch_calls = 0
