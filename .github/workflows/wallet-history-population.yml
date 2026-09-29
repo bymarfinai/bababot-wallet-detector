@@ -237,8 +237,230 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  summarize:
+
+  high_volume:
     needs: [prepare, backfill]
+    if: always()
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Download first-pass shard artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: stage10a1b-shard-${{ matrix.shard }}
+          path: /tmp/input
+      - name: Deep-plan HIGH_VOLUME wallets
+        env:
+          HISTORY_AS_OF_UNIX: ${{ needs.prepare.outputs.history_as_of_unix }}
+          SHARD_INDEX: ${{ matrix.shard }}
+        run: |
+          OUT="/tmp/stage10a1b-high/shard-$SHARD_INDEX"
+          mkdir -p "$OUT"
+
+          if [ ! -f /tmp/input/high-volume-refinement.json ]; then
+            echo "No HIGH_VOLUME wallets in shard $SHARD_INDEX"
+            python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          root = Path(f"/tmp/stage10a1b-high/shard-{os.environ['SHARD_INDEX']}")
+          (root / "high-volume-summary.json").write_text(
+              json.dumps({
+                  "source_high_volume_wallet_count": 0,
+                  "public_rpc_eligible_wallet_count": 0,
+                  "indexed_provider_wallet_count": 0,
+                  "public_rpc_completed": False,
+              }, indent=2, sort_keys=True) + "\n"
+          )
+          PY
+            exit 0
+          fi
+
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from research.wallet_s10a1_candidate_refinement import (
+              wallet_addresses_from_refinement,
+          )
+          from research.wallet_s10a1b_real_historical_backfill import (
+              SolanaWalletHistoryRpc,
+              build_refinement_subset,
+              plan_solana_rpc_history_capacity,
+          )
+
+          shard_index = int(os.environ["SHARD_INDEX"])
+          as_of = int(os.environ["HISTORY_AS_OF_UNIX"])
+          refinement = json.loads(
+              Path("/tmp/input/high-volume-refinement.json").read_text()
+          )["refinement"]
+          wallets = wallet_addresses_from_refinement(
+              refinement,
+              trader_only=True,
+          )
+
+          source = SolanaWalletHistoryRpc(
+              "https://api.mainnet-beta.solana.com",
+              source_label="solana-public-mainnet",
+          )
+          deep = plan_solana_rpc_history_capacity(
+              source,
+              wallets,
+              as_of_unix=as_of,
+              signature_page_limit=100,
+              probe_max_pages_per_wallet=5,
+          )
+
+          root = Path(f"/tmp/stage10a1b-high/shard-{shard_index}")
+          (root / "deep-capacity-plan.json").write_text(
+              json.dumps(deep, indent=2, sort_keys=True) + "\n"
+          )
+
+          if deep["standard_wallets"]:
+              eligible = build_refinement_subset(
+                  refinement,
+                  deep["standard_wallets"],
+              )
+              (root / "public-rpc-refinement.json").write_text(
+                  json.dumps(
+                      {"refinement": eligible},
+                      indent=2,
+                      sort_keys=True,
+                  ) + "\n"
+              )
+
+          if deep["high_volume_wallets"]:
+              indexed = build_refinement_subset(
+                  refinement,
+                  deep["high_volume_wallets"],
+              )
+              (root / "indexed-provider-refinement.json").write_text(
+                  json.dumps(
+                      {"refinement": indexed},
+                      indent=2,
+                      sort_keys=True,
+                  ) + "\n"
+              )
+
+          summary = {
+              "source_high_volume_wallet_count": len(wallets),
+              "public_rpc_eligible_wallet_count": int(
+                  deep["standard_wallet_count"]
+              ),
+              "indexed_provider_wallet_count": int(
+                  deep["high_volume_wallet_count"]
+              ),
+              "public_rpc_signature_cap": 500,
+              "public_rpc_completed": False,
+          }
+          (root / "high-volume-summary.json").write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(summary, indent=2))
+          PY
+      - name: Backfill HIGH_VOLUME public-RPC eligible wallets
+        env:
+          WALLET_SUPABASE_URL: https://yuqkodwdqaggsexbqiqa.supabase.co
+          WALLET_SUPABASE_SECRET_KEY: ${{ secrets.WALLET_SUPABASE_SECRET_KEY }}
+          HISTORY_AS_OF_UNIX: ${{ needs.prepare.outputs.history_as_of_unix }}
+          SHARD_INDEX: ${{ matrix.shard }}
+        run: |
+          OUT="/tmp/stage10a1b-high/shard-$SHARD_INDEX"
+          if [ ! -f "$OUT/public-rpc-refinement.json" ]; then
+            echo "No <=500-signature HIGH_VOLUME wallets in shard $SHARD_INDEX"
+            exit 0
+          fi
+
+          PERSIST_ARGS="--dry-run"
+          if [ -n "$WALLET_SUPABASE_SECRET_KEY" ]; then
+            PERSIST_ARGS=""
+          fi
+
+          python -m research.wallet_s10a1b_real_historical_backfill \
+            --refinement-file "$OUT/public-rpc-refinement.json" \
+            --provider solana-rpc \
+            --history-as-of-unix "$HISTORY_AS_OF_UNIX" \
+            --signature-page-limit 100 \
+            --max-signature-pages-per-wallet 5 \
+            --transaction-batch-size 10 \
+            --evidence-only \
+            --evidence-dir "$OUT/public-rpc-evidence" \
+            $PERSIST_ARGS \
+            --out "$OUT/public-rpc-result.json"
+
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          root = Path(f"/tmp/stage10a1b-high/shard-{os.environ['SHARD_INDEX']}")
+          summary = json.loads(
+              (root / "high-volume-summary.json").read_text()
+          )
+          summary["public_rpc_completed"] = True
+          result = json.loads(
+              (root / "public-rpc-result.json").read_text()
+          )["backfill"]
+          summary["public_rpc_raw_transaction_rows"] = int(
+              result["fetch"]["raw_transaction_rows_across_wallets"]
+          )
+          summary["public_rpc_normalized_event_rows"] = int(
+              result["normalization"]["normalized_event_count"]
+          )
+          (root / "high-volume-summary.json").write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          PY
+      - name: Backfill remaining HIGH_VOLUME with Helius when configured
+        if: needs.prepare.outputs.helius_configured == 'true'
+        env:
+          HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
+          WALLET_SUPABASE_URL: https://yuqkodwdqaggsexbqiqa.supabase.co
+          WALLET_SUPABASE_SECRET_KEY: ${{ secrets.WALLET_SUPABASE_SECRET_KEY }}
+          HISTORY_AS_OF_UNIX: ${{ needs.prepare.outputs.history_as_of_unix }}
+          SHARD_INDEX: ${{ matrix.shard }}
+        run: |
+          OUT="/tmp/stage10a1b-high/shard-$SHARD_INDEX"
+          if [ ! -f "$OUT/indexed-provider-refinement.json" ]; then
+            echo "No remaining indexed-provider wallets in shard $SHARD_INDEX"
+            exit 0
+          fi
+
+          PERSIST_ARGS="--dry-run"
+          if [ -n "$WALLET_SUPABASE_SECRET_KEY" ]; then
+            PERSIST_ARGS=""
+          fi
+
+          python -m research.wallet_s10a1b_real_historical_backfill \
+            --refinement-file "$OUT/indexed-provider-refinement.json" \
+            --provider helius \
+            --history-as-of-unix "$HISTORY_AS_OF_UNIX" \
+            --evidence-only \
+            --evidence-dir "$OUT/indexed-evidence" \
+            $PERSIST_ARGS \
+            --out "$OUT/indexed-result.json"
+      - name: Upload HIGH_VOLUME plan and evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage10a1b-high-volume-shard-${{ matrix.shard }}
+          path: /tmp/stage10a1b-high/shard-${{ matrix.shard }}
+          if-no-files-found: warn
+          retention-days: 14
+
+
+  summarize:
+    needs: [prepare, backfill, high_volume]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -247,6 +469,12 @@ jobs:
         with:
           pattern: stage10a1b-shard-*
           path: /tmp/shards
+          merge-multiple: false
+      - name: Download HIGH_VOLUME artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: stage10a1b-high-volume-shard-*
+          path: /tmp/high-volume
           merge-multiple: false
       - name: Summarize population coverage
         env:
@@ -265,6 +493,11 @@ jobs:
           normalized_rows = 0
           completed_standard_shards = 0
           failed_or_incomplete_standard_shards = 0
+          public_rpc_hv_wallets = 0
+          indexed_provider_wallets = 0
+          public_rpc_hv_raw_rows = 0
+          public_rpc_hv_normalized_rows = 0
+          public_rpc_hv_incomplete_shards = 0
 
           for plan_path in Path("/tmp/shards").rglob("capacity-plan.json"):
               plan = json.loads(plan_path.read_text())
@@ -292,6 +525,27 @@ jobs:
                   else:
                       failed_or_incomplete_standard_shards += 1
 
+          for summary_path in Path("/tmp/high-volume").rglob(
+              "high-volume-summary.json"
+          ):
+              hv = json.loads(summary_path.read_text())
+              public_rpc_hv_wallets += int(
+                  hv.get("public_rpc_eligible_wallet_count") or 0
+              )
+              indexed_provider_wallets += int(
+                  hv.get("indexed_provider_wallet_count") or 0
+              )
+              if int(hv.get("public_rpc_eligible_wallet_count") or 0):
+                  if bool(hv.get("public_rpc_completed")):
+                      public_rpc_hv_raw_rows += int(
+                          hv.get("public_rpc_raw_transaction_rows") or 0
+                      )
+                      public_rpc_hv_normalized_rows += int(
+                          hv.get("public_rpc_normalized_event_rows") or 0
+                      )
+                  else:
+                      public_rpc_hv_incomplete_shards += 1
+
           expected = int(os.environ["EXPECTED_TRADER_COUNT"])
           summary = {
               "expected_trader_wallet_count": expected,
@@ -312,8 +566,27 @@ jobs:
               "supabase_write_configured": (
                   os.environ["SUPABASE_WRITE_CONFIGURED"] == "true"
               ),
+              "high_volume_public_rpc_wallet_count": (
+                  public_rpc_hv_wallets
+              ),
+              "high_volume_indexed_provider_wallet_count": (
+                  indexed_provider_wallets
+              ),
+              "high_volume_public_rpc_raw_rows": (
+                  public_rpc_hv_raw_rows
+              ),
+              "high_volume_public_rpc_normalized_rows": (
+                  public_rpc_hv_normalized_rows
+              ),
+              "high_volume_public_rpc_incomplete_shards": (
+                  public_rpc_hv_incomplete_shards
+              ),
+              "high_volume_second_lane_partition_complete": (
+                  public_rpc_hv_wallets + indexed_provider_wallets
+                  == high_volume
+              ),
               "high_volume_policy": (
-                  "REQUIRES_HIGH_CAPACITY_OR_INDEXED_HISTORY_PROVIDER"
+                  "PUBLIC_RPC_UP_TO_500_SIGNATURES_ELSE_INDEXED_PROVIDER"
               ),
           }
           print(json.dumps(summary, indent=2))
@@ -322,6 +595,8 @@ jobs:
           )
           assert summary["lane_partition_complete"]
           assert summary["failed_or_incomplete_standard_shards"] == 0
+          assert summary["high_volume_second_lane_partition_complete"]
+          assert summary["high_volume_public_rpc_incomplete_shards"] == 0
           PY
       - name: Upload population summary
         uses: actions/upload-artifact@v4
