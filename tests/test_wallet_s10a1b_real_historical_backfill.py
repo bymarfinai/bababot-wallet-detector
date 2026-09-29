@@ -317,14 +317,14 @@ class Stage10A1BRealBackfillTests(unittest.TestCase):
         )
 
     def test_transaction_batch_rate_limit_falls_back_to_scalar_rpc(self):
-        seen_batch = False
+        batch_calls = 0
         scalar_calls = []
 
         def transport(method, url, headers, body):
-            nonlocal seen_batch
+            nonlocal batch_calls
             payload = json.loads(body.decode("utf-8"))
             if isinstance(payload, list):
-                seen_batch = True
+                batch_calls += 1
                 return 200, json.dumps([
                     {
                         "jsonrpc": "2.0",
@@ -350,13 +350,13 @@ class Stage10A1BRealBackfillTests(unittest.TestCase):
         source = SolanaWalletHistoryRpc(
             "https://rpc.example/",
             transport=transport,
-            attempts=1,
+            attempts=3,
         )
         rows = source.transactions(
             ["a", "b"],
             batch_size=2,
         )
-        self.assertTrue(seen_batch)
+        self.assertEqual(batch_calls, 1)
         self.assertEqual(scalar_calls, ["a", "b"])
         self.assertEqual(sorted(rows), ["a", "b"])
 
