@@ -98,7 +98,7 @@ jobs:
               wallets,
               as_of_unix=int(os.environ["HISTORY_AS_OF_UNIX"]),
               signature_page_limit=1000,
-              probe_max_pages_per_wallet=5,
+              probe_max_pages_per_wallet=1,
           )
 
           root = Path("/tmp/stage10a1b-plan")
@@ -213,7 +213,7 @@ jobs:
             --shard-count "${{ needs.prepare.outputs.standard_shard_count }}" \
             --shard-index "${{ matrix.shard }}" \
             --signature-page-limit 1000 \
-            --max-signature-pages-per-wallet 5 \
+            --max-signature-pages-per-wallet 1 \
             --transaction-batch-size 1 \
             --evidence-only \
             --evidence-dir "$SHARD_DIR/evidence" \
