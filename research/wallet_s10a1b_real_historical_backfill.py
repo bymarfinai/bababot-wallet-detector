@@ -461,6 +461,7 @@ def _fetch_wallet_signature_index(
     as_of_unix: int,
     page_limit: int,
     max_pages: int,
+    fail_on_incomplete: bool = True,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     wallet = validate_solana_address(wallet)
     if not 1 <= int(page_limit) <= 1000:
@@ -520,7 +521,7 @@ def _fetch_wallet_signature_index(
             exhausted = True
             break
 
-    if not exhausted:
+    if not exhausted and fail_on_incomplete:
         raise RuntimeError(
             f"incomplete signature history for {wallet}: "
             f"max_pages={max_pages} reached before pagination exhausted"
@@ -544,9 +545,85 @@ def _fetch_wallet_signature_index(
         "signature_pages_fetched": pages,
         "signature_count_as_of": len(ordered),
         "missing_block_time_signature_count": missing_block_time,
-        "signature_pagination_exhausted": True,
+        "signature_pagination_exhausted": bool(exhausted),
         "first_signature_block_time": min(times) if times else None,
         "last_signature_block_time": max(times) if times else None,
+    }
+
+
+def plan_solana_rpc_history_capacity(
+    source: SolanaWalletHistoryRpc,
+    wallets: Iterable[str],
+    *,
+    as_of_unix: int,
+    signature_page_limit: int = DEFAULT_SIGNATURE_PAGE_LIMIT,
+    probe_max_pages_per_wallet: int = 5,
+) -> dict[str, Any]:
+    """Partition wallets by whether signature history exhausts within a cap.
+
+    This is an execution-capacity classification only. HIGH_VOLUME wallets
+    remain in the candidate universe and are never treated as unqualified.
+    """
+    wallet_list = sorted({
+        validate_solana_address(wallet)
+        for wallet in wallets
+    })
+    if not wallet_list:
+        raise ValueError("at least one wallet is required")
+
+    first_available_slot = source.first_available_block()
+    archive_from_genesis = first_available_slot == 0
+    reports: list[dict[str, Any]] = []
+    standard_wallets: list[str] = []
+    high_volume_wallets: list[str] = []
+
+    for wallet in wallet_list:
+        rows, report = _fetch_wallet_signature_index(
+            source,
+            wallet,
+            as_of_unix=int(as_of_unix),
+            page_limit=int(signature_page_limit),
+            max_pages=int(probe_max_pages_per_wallet),
+            fail_on_incomplete=False,
+        )
+        report["probed_signature_count"] = len(rows)
+        if bool(report["signature_pagination_exhausted"]):
+            report["capacity_lane"] = "STANDARD"
+            standard_wallets.append(wallet)
+        else:
+            report["capacity_lane"] = "HIGH_VOLUME"
+            high_volume_wallets.append(wallet)
+        reports.append(report)
+
+    core = {
+        "version": STAGE10A1B_VERSION,
+        "provider": "solana_json_rpc",
+        "source_label": source.source_label,
+        "source_origin": source.public_origin,
+        "history_as_of_unix": int(as_of_unix),
+        "provider_first_available_slot": first_available_slot,
+        "provider_archive_from_genesis": archive_from_genesis,
+        "probe_signature_page_limit": int(signature_page_limit),
+        "probe_max_pages_per_wallet": int(
+            probe_max_pages_per_wallet
+        ),
+        "wallet_count": len(wallet_list),
+        "standard_wallet_count": len(standard_wallets),
+        "high_volume_wallet_count": len(high_volume_wallets),
+        "standard_wallets": standard_wallets,
+        "high_volume_wallets": high_volume_wallets,
+        "wallet_reports": reports,
+        "policy": {
+            "quality_filter": None,
+            "high_volume_is_unqualified": False,
+            "high_volume_action": (
+                "REQUIRES_HIGH_CAPACITY_OR_INDEXED_HISTORY_PROVIDER"
+            ),
+        },
+    }
+    return {
+        **core,
+        "plan_fingerprint": _fingerprint(core),
     }
 
 
