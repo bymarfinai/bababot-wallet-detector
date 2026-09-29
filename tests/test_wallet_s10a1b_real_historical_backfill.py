@@ -274,6 +274,50 @@ class Stage10A1BRealBackfillTests(unittest.TestCase):
             ["old"],
         )
 
+    def test_transaction_batch_rate_limit_falls_back_to_scalar_rpc(self):
+        seen_batch = False
+        scalar_calls = []
+
+        def transport(method, url, headers, body):
+            nonlocal seen_batch
+            payload = json.loads(body.decode("utf-8"))
+            if isinstance(payload, list):
+                seen_batch = True
+                return 200, json.dumps([
+                    {
+                        "jsonrpc": "2.0",
+                        "id": item["id"],
+                        "error": {
+                            "code": 429,
+                            "message": "Too many requests",
+                        },
+                    }
+                    for item in payload
+                ]).encode("utf-8")
+
+            self.assertEqual(payload["method"], "getTransaction")
+            signature = payload["params"][0]
+            scalar_calls.append(signature)
+            block_time = 900 + len(scalar_calls)
+            return 200, json.dumps({
+                "jsonrpc": "2.0",
+                "id": payload["id"],
+                "result": raw_tx(signature, block_time),
+            }).encode("utf-8")
+
+        source = SolanaWalletHistoryRpc(
+            "https://rpc.example/",
+            transport=transport,
+            attempts=1,
+        )
+        rows = source.transactions(
+            ["a", "b"],
+            batch_size=2,
+        )
+        self.assertTrue(seen_batch)
+        self.assertEqual(scalar_calls, ["a", "b"])
+        self.assertEqual(sorted(rows), ["a", "b"])
+
     def test_native_rpc_retention_gap_fails_closed_for_qualification(self):
         def transport(method, url, headers, body):
             payload = json.loads(body.decode("utf-8"))
