@@ -317,6 +317,39 @@ class Stage10A1BRealBackfillTests(unittest.TestCase):
             ["old"],
         )
 
+    def test_public_rpc_request_pacing_waits_between_calls(self):
+        calls = []
+
+        def transport(method, url, headers, body):
+            payload = json.loads(body.decode("utf-8"))
+            calls.append(payload["method"])
+            return 200, json.dumps({
+                "jsonrpc": "2.0",
+                "id": payload["id"],
+                "result": 0,
+            }).encode("utf-8")
+
+        source = SolanaWalletHistoryRpc(
+            "https://rpc.example/",
+            transport=transport,
+            attempts=1,
+            min_request_interval_seconds=0.5,
+        )
+        with patch(
+            "research.wallet_s10a1b_real_historical_backfill.time.monotonic",
+            side_effect=[10.0, 10.0, 10.1, 10.1, 10.6],
+        ), patch(
+            "research.wallet_s10a1b_real_historical_backfill.time.sleep"
+        ) as sleeper:
+            self.assertEqual(source.first_available_block(), 0)
+            self.assertEqual(source.first_available_block(), 0)
+
+        self.assertEqual(calls, [
+            "getFirstAvailableBlock",
+            "getFirstAvailableBlock",
+        ])
+        sleeper.assert_called_once()
+        self.assertAlmostEqual(sleeper.call_args.args[0], 0.4)
     def test_scalar_http_429_has_single_retry_loop(self):
         calls = 0
 
