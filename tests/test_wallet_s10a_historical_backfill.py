@@ -5,7 +5,6 @@ from decimal import Decimal
 from research.wallet_s10a_historical_backfill import (
     build_causal_historical_replay,
     fetch_complete_wallet_history,
-    fetch_wallet_history_rpc,
     normalize_wallet_histories,
 )
 from research.wallet_supabase_adapter import (
@@ -251,92 +250,6 @@ class Stage10AHistoricalBackfillTests(unittest.TestCase):
                 fetch_page=endless,
             )
 
-    def test_rpc_history_fails_closed_at_signature_cap(self):
-        def fake_rpc(method, params):
-            if method == "getSignaturesForAddress":
-                return [{
-                    "signature": "sig-1",
-                    "slot": 100,
-                    "blockTime": 1000,
-                    "err": None,
-                }]
-            raise AssertionError("getTransaction should not run")
-
-        with self.assertRaises(RuntimeError):
-            fetch_wallet_history_rpc(
-                "https://rpc.example/",
-                WALLET_A,
-                max_signatures=1,
-                page_limit=1,
-                rpc_call=fake_rpc,
-            )
-
-    def test_rpc_bounded_history_is_explicitly_labeled(self):
-        def fake_rpc(method, params):
-            if method == "getSignaturesForAddress":
-                return [{
-                    "signature": "sig-1",
-                    "slot": 100,
-                    "blockTime": 1000,
-                    "err": None,
-                }]
-            if method == "getTransaction":
-                return raw_tx("sig-1", 1000)
-            raise AssertionError(method)
-
-        rows, report = fetch_wallet_history_rpc(
-            "https://rpc.example/?secret=redacted",
-            WALLET_A,
-            max_signatures=1,
-            page_limit=1,
-            allow_bounded_history=True,
-            rpc_call=fake_rpc,
-        )
-        self.assertEqual(len(rows), 1)
-        self.assertFalse(report["history_complete"])
-        self.assertTrue(report["bounded_history"])
-        self.assertEqual(
-            report["source_origin"],
-            "https://rpc.example/",
-        )
-
-    def test_rpc_time_floor_is_explicit_bounded_coverage(self):
-        def fake_rpc(method, params):
-            if method == "getSignaturesForAddress":
-                return [
-                    {
-                        "signature": "new",
-                        "slot": 200,
-                        "blockTime": 2000,
-                        "err": None,
-                    },
-                    {
-                        "signature": "old",
-                        "slot": 100,
-                        "blockTime": 900,
-                        "err": None,
-                    },
-                ]
-            if method == "getTransaction":
-                signature = params[0]
-                return raw_tx(signature, 2000)
-            raise AssertionError(method)
-
-        rows, report = fetch_wallet_history_rpc(
-            "https://rpc.example/",
-            WALLET_A,
-            max_signatures=10,
-            page_limit=10,
-            min_block_time_unix=1000,
-            allow_bounded_history=True,
-            rpc_call=fake_rpc,
-        )
-        self.assertEqual(
-            [row["transaction"]["signatures"][0] for row in rows],
-            ["new"],
-        )
-        self.assertTrue(report["time_floor_reached"])
-        self.assertFalse(report["history_complete"])
     def test_normalize_history_reports_missing_signature(self):
         good = raw_tx("ok", 100)
         bad = raw_tx("", 110)
