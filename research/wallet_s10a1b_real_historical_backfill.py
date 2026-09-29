@@ -728,6 +728,187 @@ def _load_refinement(path: str | Path) -> dict[str, Any]:
     return refinement
 
 
+def _validate_backfill_wallet_coverage(
+    refinement: dict[str, Any],
+    raw_by_wallet: dict[str, Iterable[dict[str, Any]]],
+) -> None:
+    _validate_backfill_wallet_coverage(
+        refinement,
+        raw_by_wallet,
+    )
+
+
+def build_stage10a1b_evidence_report(
+    refinement: dict[str, Any],
+    *,
+    raw_by_wallet: dict[str, list[dict[str, Any]]],
+    fetch_report: dict[str, Any],
+    history_as_of_unix: int,
+) -> tuple[
+    dict[str, Any],
+    dict[str, list[dict[str, Any]]],
+]:
+    verify_candidate_refinement(refinement)
+    _validate_backfill_wallet_coverage(
+        refinement,
+        raw_by_wallet,
+    )
+    effective_after = refinement_effective_after_unix(refinement)
+    history_as_of_unix = int(history_as_of_unix)
+    if history_as_of_unix <= effective_after:
+        raise ValueError(
+            "history_as_of_unix must be strictly after the "
+            "discovery/refinement activation time"
+        )
+
+    normalized, normalization_report = normalize_wallet_histories(
+        raw_by_wallet
+    )
+    report_core = {
+        "version": STAGE10A1B_VERSION,
+        "mode": "HISTORICAL_EVIDENCE_BACKFILL",
+        "source_kind": "REAL",
+        "source_refinement_fingerprint": refinement[
+            "refinement_fingerprint"
+        ],
+        "parent_refinement_fingerprint": refinement.get(
+            "parent_refinement_fingerprint"
+        ),
+        "universe_effective_after_unix": effective_after,
+        "history_as_of_unix": history_as_of_unix,
+        "fetch": fetch_report,
+        "normalization": normalization_report,
+        "stage3_to_stage5_executed": False,
+        "edge_claim": None,
+    }
+    report = {
+        **report_core,
+        "report_fingerprint": _fingerprint(report_core),
+    }
+    return report, normalized
+
+
+def persist_stage10a1b_evidence(
+    client: SupabaseRestClient,
+    *,
+    raw_by_wallet: dict[str, Iterable[dict[str, Any]]],
+    normalized_by_wallet: dict[str, Iterable[dict[str, Any]]],
+    raw_source: str,
+) -> dict[str, int]:
+    raw_rows = client.persist_historical_raw(
+        raw_by_wallet,
+        source=raw_source,
+    )
+    normalized_rows = client.persist_normalized_history(
+        normalized_by_wallet
+    )
+    return {
+        "historical_raw_rows": raw_rows,
+        "normalized_history_rows": normalized_rows,
+    }
+
+
+def write_stage10a1b_evidence_bundle(
+    directory: str | Path,
+    *,
+    report: dict[str, Any],
+    raw_by_wallet: dict[str, Iterable[dict[str, Any]]],
+    normalized_by_wallet: dict[str, Iterable[dict[str, Any]]],
+    raw_source: str,
+) -> dict[str, Any]:
+    root = Path(directory)
+    root.mkdir(parents=True, exist_ok=True)
+
+    manifest = {
+        "version": STAGE10A1B_VERSION,
+        "source_kind": "REAL",
+        "raw_source": raw_source,
+        "report_fingerprint": report["report_fingerprint"],
+        "source_refinement_fingerprint": report[
+            "source_refinement_fingerprint"
+        ],
+        "parent_refinement_fingerprint": report.get(
+            "parent_refinement_fingerprint"
+        ),
+        "history_as_of_unix": report["history_as_of_unix"],
+        "universe_effective_after_unix": report[
+            "universe_effective_after_unix"
+        ],
+        "wallet_count": int(
+            report["fetch"].get("wallet_count") or 0
+        ),
+        "raw_transaction_rows": int(
+            report["fetch"].get(
+                "raw_transaction_rows_across_wallets"
+            ) or 0
+        ),
+        "normalized_event_count": int(
+            report["normalization"].get(
+                "normalized_event_count"
+            ) or 0
+        ),
+        "qualification_grade": bool(
+            report["fetch"].get("qualification_grade")
+        ),
+        "files": {
+            "raw": "raw.jsonl",
+            "normalized": "normalized.jsonl",
+            "report": "report.json",
+        },
+    }
+
+    with (root / "raw.jsonl").open("w", encoding="utf-8") as handle:
+        for wallet, rows in sorted(raw_by_wallet.items()):
+            for tx in rows:
+                handle.write(json.dumps(
+                    {
+                        "wallet": wallet,
+                        "source": raw_source,
+                        "transaction": tx,
+                    },
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    default=str,
+                ) + "\n")
+
+    with (root / "normalized.jsonl").open(
+        "w",
+        encoding="utf-8",
+    ) as handle:
+        for wallet, rows in sorted(normalized_by_wallet.items()):
+            for event in rows:
+                handle.write(json.dumps(
+                    {
+                        "wallet": wallet,
+                        "event": event,
+                    },
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    default=str,
+                ) + "\n")
+
+    (root / "report.json").write_text(
+        json.dumps(
+            report,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+            default=str,
+        ) + "\n",
+        encoding="utf-8",
+    )
+    (root / "manifest.json").write_text(
+        json.dumps(
+            manifest,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        ) + "\n",
+        encoding="utf-8",
+    )
+    return manifest
+
+
 def build_stage10a1b_report(
     refinement: dict[str, Any],
     *,
@@ -884,6 +1065,20 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--evidence-only",
+        action="store_true",
+        help=(
+            "Stop after raw + Stage-2 normalized historical evidence. "
+            "This is the production Stage-10A-1B population mode; "
+            "Stage 3-5 reconstruction belongs to Stage 10A-1C."
+        ),
+    )
+    parser.add_argument(
+        "--evidence-dir",
+        default=None,
+        help="Optional directory for manifest/raw/normalized/report files.",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Build report but do not write Supabase.",
@@ -938,14 +1133,33 @@ def main() -> int:
         )
         raw_source = "helius_gtfa"
 
-    report, normalized, replay = build_stage10a1b_report(
-        refinement,
-        raw_by_wallet=raw_by_wallet,
-        fetch_report=fetch_report,
-        history_as_of_unix=args.history_as_of_unix,
-        signal_from_unix=args.signal_from_unix,
-        signal_to_unix=args.signal_to_unix,
-    )
+    replay = None
+    if args.evidence_only:
+        report, normalized = build_stage10a1b_evidence_report(
+            refinement,
+            raw_by_wallet=raw_by_wallet,
+            fetch_report=fetch_report,
+            history_as_of_unix=args.history_as_of_unix,
+        )
+    else:
+        report, normalized, replay = build_stage10a1b_report(
+            refinement,
+            raw_by_wallet=raw_by_wallet,
+            fetch_report=fetch_report,
+            history_as_of_unix=args.history_as_of_unix,
+            signal_from_unix=args.signal_from_unix,
+            signal_to_unix=args.signal_to_unix,
+        )
+
+    bundle_manifest = None
+    if args.evidence_dir:
+        bundle_manifest = write_stage10a1b_evidence_bundle(
+            args.evidence_dir,
+            report=report,
+            raw_by_wallet=raw_by_wallet,
+            normalized_by_wallet=normalized,
+            raw_source=raw_source,
+        )
 
     persistence = None
     if not args.dry_run:
@@ -955,16 +1169,27 @@ def main() -> int:
                 "non-qualification-grade history source"
             )
         client = SupabaseRestClient.from_env()
-        persistence = persist_stage10a_backfill(
-            client,
-            raw_by_wallet=raw_by_wallet,
-            normalized_by_wallet=normalized,
-            replay=replay,
-            raw_source=raw_source,
-        )
+        if args.evidence_only:
+            persistence = persist_stage10a1b_evidence(
+                client,
+                raw_by_wallet=raw_by_wallet,
+                normalized_by_wallet=normalized,
+                raw_source=raw_source,
+            )
+        else:
+            if replay is None:
+                raise RuntimeError("causal replay is unexpectedly absent")
+            persistence = persist_stage10a_backfill(
+                client,
+                raw_by_wallet=raw_by_wallet,
+                normalized_by_wallet=normalized,
+                replay=replay,
+                raw_source=raw_source,
+            )
 
     output = {
         "backfill": report,
+        "evidence_bundle_manifest": bundle_manifest,
         "supabase_persistence": persistence,
         "dry_run": bool(args.dry_run),
     }
@@ -979,6 +1204,7 @@ def main() -> int:
         "raw_transaction_rows": fetch_report.get(
             "raw_transaction_rows_across_wallets"
         ),
+        "mode": report.get("mode", "CAUSAL_REPLAY_INTEGRATION"),
         "normalized_event_count": report[
             "normalization"
         ]["normalized_event_count"],
