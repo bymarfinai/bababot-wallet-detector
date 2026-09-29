@@ -17,6 +17,7 @@ from research.wallet_s10a1b_real_historical_backfill import (
     build_stage10a1b_evidence_report,
     build_stage10a1b_report,
     collect_solana_rpc_histories,
+    plan_solana_rpc_history_capacity,
     refinement_effective_after_unix,
     write_stage10a1b_evidence_bundle,
 )
@@ -358,6 +359,114 @@ class Stage10A1BRealBackfillTests(unittest.TestCase):
         self.assertTrue(seen_batch)
         self.assertEqual(scalar_calls, ["a", "b"])
         self.assertEqual(sorted(rows), ["a", "b"])
+
+    def test_capacity_planner_separates_standard_and_high_volume(self):
+        calls = {}
+
+        def transport(method, url, headers, body):
+            payload = json.loads(body.decode("utf-8"))
+            rpc_method = payload["method"]
+            if rpc_method == "getFirstAvailableBlock":
+                result = 0
+            elif rpc_method == "getSignaturesForAddress":
+                wallet = payload["params"][0]
+                before = payload["params"][1].get("before")
+                key = (wallet, before)
+                calls[key] = calls.get(key, 0) + 1
+
+                if wallet == WALLET_A:
+                    result = [{
+                        "signature": "a-1",
+                        "slot": 900,
+                        "blockTime": 900,
+                        "err": None,
+                    }]
+                else:
+                    # With page_limit=1 and max_pages=2, WALLET_B
+                    # deliberately keeps returning a next cursor.
+                    suffix = "1" if before is None else "2"
+                    result = [{
+                        "signature": f"b-{suffix}",
+                        "slot": 900,
+                        "blockTime": 900,
+                        "err": None,
+                    }]
+            else:
+                raise AssertionError(rpc_method)
+
+            return 200, json.dumps({
+                "jsonrpc": "2.0",
+                "id": payload["id"],
+                "result": result,
+            }).encode("utf-8")
+
+        source = SolanaWalletHistoryRpc(
+            "https://rpc.example/",
+            transport=transport,
+        )
+        plan = plan_solana_rpc_history_capacity(
+            source,
+            [WALLET_B, WALLET_A],
+            as_of_unix=1000,
+            signature_page_limit=1,
+            probe_max_pages_per_wallet=2,
+        )
+        self.assertEqual(plan["standard_wallets"], [WALLET_A])
+        self.assertEqual(plan["high_volume_wallets"], [WALLET_B])
+        self.assertEqual(plan["standard_wallet_count"], 1)
+        self.assertEqual(plan["high_volume_wallet_count"], 1)
+        self.assertTrue(plan["provider_archive_from_genesis"])
+        self.assertIsNone(plan["policy"]["quality_filter"])
+        self.assertFalse(plan["policy"]["high_volume_is_unqualified"])
+        self.assertEqual(
+            plan["policy"]["high_volume_action"],
+            "REQUIRES_HIGH_CAPACITY_OR_INDEXED_HISTORY_PROVIDER",
+        )
+
+    def test_capacity_planner_is_deterministic(self):
+        def transport(method, url, headers, body):
+            payload = json.loads(body.decode("utf-8"))
+            if payload["method"] == "getFirstAvailableBlock":
+                result = 0
+            elif payload["method"] == "getSignaturesForAddress":
+                result = []
+            else:
+                raise AssertionError(payload["method"])
+            return 200, json.dumps({
+                "jsonrpc": "2.0",
+                "id": payload["id"],
+                "result": result,
+            }).encode("utf-8")
+
+        one = plan_solana_rpc_history_capacity(
+            SolanaWalletHistoryRpc(
+                "https://rpc.example/",
+                transport=transport,
+            ),
+            [WALLET_B, WALLET_A],
+            as_of_unix=1000,
+            signature_page_limit=10,
+            probe_max_pages_per_wallet=2,
+        )
+        two = plan_solana_rpc_history_capacity(
+            SolanaWalletHistoryRpc(
+                "https://rpc.example/",
+                transport=transport,
+            ),
+            [WALLET_A, WALLET_B],
+            as_of_unix=1000,
+            signature_page_limit=10,
+            probe_max_pages_per_wallet=2,
+        )
+        self.assertEqual(
+            one["plan_fingerprint"],
+            two["plan_fingerprint"],
+        )
+        self.assertEqual(
+            one["standard_wallets"],
+            [WALLET_B, WALLET_A] if WALLET_B < WALLET_A else [WALLET_A, WALLET_B],
+        )
+        self.assertEqual(one["high_volume_wallets"], [])
 
     def test_native_rpc_retention_gap_fails_closed_for_qualification(self):
         def transport(method, url, headers, body):
