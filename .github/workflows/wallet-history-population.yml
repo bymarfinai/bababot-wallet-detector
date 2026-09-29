@@ -12,6 +12,12 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       history_as_of_unix: ${{ steps.freeze.outputs.history_as_of_unix }}
+      standard_wallet_count: ${{ steps.capacity.outputs.standard_wallet_count }}
+      high_volume_wallet_count: ${{ steps.capacity.outputs.high_volume_wallet_count }}
+      standard_shard_count: ${{ steps.capacity.outputs.standard_shard_count }}
+      standard_matrix: ${{ steps.capacity.outputs.standard_matrix }}
+      helius_configured: ${{ steps.capabilities.outputs.helius_configured }}
+      supabase_write_configured: ${{ steps.capabilities.outputs.supabase_write_configured }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -19,6 +25,26 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Check optional server capabilities
+        id: capabilities
+        env:
+          HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
+          WALLET_SUPABASE_SECRET_KEY: ${{ secrets.WALLET_SUPABASE_SECRET_KEY }}
+        run: |
+          if [ -n "$HELIUS_API_KEY" ]; then
+            echo "helius_configured=true" >> "$GITHUB_OUTPUT"
+            echo "Helius server credential configured: yes"
+          else
+            echo "helius_configured=false" >> "$GITHUB_OUTPUT"
+            echo "Helius server credential configured: no"
+          fi
+          if [ -n "$WALLET_SUPABASE_SECRET_KEY" ]; then
+            echo "supabase_write_configured=true" >> "$GITHUB_OUTPUT"
+            echo "Supabase server write credential configured: yes"
+          else
+            echo "supabase_write_configured=false" >> "$GITHUB_OUTPUT"
+            echo "Supabase server write credential configured: no"
+          fi
       - name: Discover live candidate universe
         run: |
           python -m research.wallet_s10a0_wallet_universe_discovery \
@@ -36,37 +62,123 @@ jobs:
         run: |
           HISTORY_AS_OF=$(date +%s)
           echo "history_as_of_unix=$HISTORY_AS_OF" >> "$GITHUB_OUTPUT"
+      - name: Plan standard and high-volume lanes
+        id: capacity
+        env:
+          HISTORY_AS_OF_UNIX: ${{ steps.freeze.outputs.history_as_of_unix }}
+        run: |
+          mkdir -p /tmp/stage10a1b-plan
           python - <<'PY'
           import json
+          import os
           from pathlib import Path
-          payload = json.loads(Path("/tmp/stage10a1a.json").read_text())
-          refinement = payload["refinement"]
+
+          from research.wallet_s10a1_candidate_refinement import (
+              wallet_addresses_from_refinement,
+          )
+          from research.wallet_s10a1b_real_historical_backfill import (
+              SolanaWalletHistoryRpc,
+              build_refinement_subset,
+              plan_solana_rpc_history_capacity,
+          )
+
+          refinement = json.loads(
+              Path("/tmp/stage10a1a.json").read_text()
+          )["refinement"]
+          wallets = wallet_addresses_from_refinement(
+              refinement,
+              trader_only=True,
+          )
+          source = SolanaWalletHistoryRpc(
+              "https://api.mainnet-beta.solana.com",
+              source_label="solana-public-mainnet",
+          )
+          plan = plan_solana_rpc_history_capacity(
+              source,
+              wallets,
+              as_of_unix=int(os.environ["HISTORY_AS_OF_UNIX"]),
+              signature_page_limit=1000,
+              probe_max_pages_per_wallet=5,
+          )
+
+          root = Path("/tmp/stage10a1b-plan")
+          (root / "capacity-plan.json").write_text(
+              json.dumps(plan, indent=2, sort_keys=True) + "\n"
+          )
+
+          standard = plan["standard_wallets"]
+          high_volume = plan["high_volume_wallets"]
+
+          if standard:
+              standard_refinement = build_refinement_subset(
+                  refinement,
+                  standard,
+              )
+              (root / "standard-refinement.json").write_text(
+                  json.dumps(
+                      {"refinement": standard_refinement},
+                      indent=2,
+                      sort_keys=True,
+                  ) + "\n"
+              )
+
+          if high_volume:
+              high_volume_refinement = build_refinement_subset(
+                  refinement,
+                  high_volume,
+              )
+              (root / "high-volume-refinement.json").write_text(
+                  json.dumps(
+                      {"refinement": high_volume_refinement},
+                      indent=2,
+                      sort_keys=True,
+                  ) + "\n"
+              )
+
+          shard_count = min(8, len(standard)) if standard else 0
+          matrix = list(range(shard_count))
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"standard_wallet_count={len(standard)}\n")
+              handle.write(f"high_volume_wallet_count={len(high_volume)}\n")
+              handle.write(f"standard_shard_count={shard_count}\n")
+              handle.write(
+                  "standard_matrix="
+                  + json.dumps(matrix, separators=(",", ":"))
+                  + "\n"
+              )
+
           print(json.dumps({
               "refinement_fingerprint": refinement["refinement_fingerprint"],
-              "activity_candidate_wallet_count": refinement[
-                  "activity_candidate_wallet_count"
+              "trader_candidate_wallet_count": len(wallets),
+              "standard_wallet_count": len(standard),
+              "high_volume_wallet_count": len(high_volume),
+              "standard_shard_count": shard_count,
+              "provider_first_available_slot": plan[
+                  "provider_first_available_slot"
               ],
-              "trader_candidate_wallet_count": refinement[
-                  "trader_candidate_wallet_count"
+              "provider_archive_from_genesis": plan[
+                  "provider_archive_from_genesis"
               ],
-              "meme_buy_candidate_wallet_count": refinement[
-                  "meme_buy_candidate_wallet_count"
-              ],
+              "capacity_plan_fingerprint": plan["plan_fingerprint"],
           }, indent=2))
           PY
-      - name: Upload frozen refinement
+      - name: Upload frozen population plan
         uses: actions/upload-artifact@v4
         with:
-          name: stage10a1b-frozen-refinement
-          path: /tmp/stage10a1a.json
+          name: stage10a1b-population-plan
+          path: |
+            /tmp/stage10a1a.json
+            /tmp/stage10a1b-plan
           retention-days: 14
 
-  backfill:
+  standard-backfill:
     needs: prepare
+    if: needs.prepare.outputs.standard_wallet_count != '0'
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+        shard: ${{ fromJSON(needs.prepare.outputs.standard_matrix) }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -76,32 +188,58 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Download frozen refinement
+      - name: Download frozen population plan
         uses: actions/download-artifact@v4
         with:
-          name: stage10a1b-frozen-refinement
+          name: stage10a1b-population-plan
           path: /tmp/input
-      - name: Backfill shard from real Solana history
+      - name: Backfill STANDARD shard
+        env:
+          WALLET_SUPABASE_URL: https://yuqkodwdqaggsexbqiqa.supabase.co
+          WALLET_SUPABASE_SECRET_KEY: ${{ secrets.WALLET_SUPABASE_SECRET_KEY }}
         run: |
-          mkdir -p "/tmp/stage10a1b/shard-${{ matrix.shard }}"
+          SHARD_DIR="/tmp/stage10a1b/standard-${{ matrix.shard }}"
+          mkdir -p "$SHARD_DIR"
+
+          PERSIST_ARGS="--dry-run"
+          if [ -n "$WALLET_SUPABASE_SECRET_KEY" ]; then
+            PERSIST_ARGS=""
+          fi
+
           python -m research.wallet_s10a1b_real_historical_backfill \
-            --refinement-file /tmp/input/stage10a1a.json \
+            --refinement-file /tmp/input/stage10a1b-plan/standard-refinement.json \
             --provider solana-rpc \
             --history-as-of-unix "${{ needs.prepare.outputs.history_as_of_unix }}" \
-            --shard-count 8 \
+            --shard-count "${{ needs.prepare.outputs.standard_shard_count }}" \
             --shard-index "${{ matrix.shard }}" \
             --signature-page-limit 1000 \
             --max-signature-pages-per-wallet 5 \
             --transaction-batch-size 1 \
             --evidence-only \
-            --evidence-dir "/tmp/stage10a1b/shard-${{ matrix.shard }}/evidence" \
-            --dry-run \
-            --out "/tmp/stage10a1b/shard-${{ matrix.shard }}/result.json"
-      - name: Upload shard evidence
+            --evidence-dir "$SHARD_DIR/evidence" \
+            $PERSIST_ARGS \
+            --out "$SHARD_DIR/result.json"
+      - name: Upload STANDARD shard evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: stage10a1b-shard-${{ matrix.shard }}
-          path: /tmp/stage10a1b/shard-${{ matrix.shard }}
+          name: stage10a1b-standard-${{ matrix.shard }}
+          path: /tmp/stage10a1b/standard-${{ matrix.shard }}
           if-no-files-found: warn
           retention-days: 14
+
+  high-volume-status:
+    needs: prepare
+    if: needs.prepare.outputs.high_volume_wallet_count != '0'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report HIGH_VOLUME lane status
+        run: |
+          echo "high_volume_wallet_count=${{ needs.prepare.outputs.high_volume_wallet_count }}"
+          echo "helius_configured=${{ needs.prepare.outputs.helius_configured }}"
+          if [ "${{ needs.prepare.outputs.helius_configured }}" = "true" ]; then
+            echo "HIGH_VOLUME lane has an indexed-provider credential available."
+            echo "Backfill activation can proceed in a dedicated rate-controlled job."
+          else
+            echo "HIGH_VOLUME lane remains pending a high-capacity/indexed history provider."
+          fi
