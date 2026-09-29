@@ -405,6 +405,38 @@ def build_refinement_subset(
     }
 
 
+def build_refinement_shard(
+    refinement: dict[str, Any],
+    *,
+    shard_index: int,
+    shard_count: int,
+) -> dict[str, Any]:
+    verify_candidate_refinement(refinement)
+    shard_index = int(shard_index)
+    shard_count = int(shard_count)
+    if shard_count < 1:
+        raise ValueError("shard_count must be >= 1")
+    if shard_index < 0 or shard_index >= shard_count:
+        raise ValueError(
+            "shard_index must satisfy 0 <= shard_index < shard_count"
+        )
+
+    wallets = wallet_addresses_from_refinement(
+        refinement,
+        trader_only=True,
+    )
+    selected = [
+        wallet
+        for index, wallet in enumerate(wallets)
+        if index % shard_count == shard_index
+    ]
+    if not selected:
+        raise ValueError(
+            f"refinement shard {shard_index}/{shard_count} is empty"
+        )
+    return build_refinement_subset(refinement, selected)
+
+
 def refinement_effective_after_unix(
     refinement: dict[str, Any],
 ) -> int:
@@ -790,6 +822,18 @@ def main() -> int:
     )
     parser.add_argument("--refinement-file", required=True)
     parser.add_argument(
+        "--shard-count",
+        type=int,
+        default=1,
+        help="Deterministically split sorted trader wallets into N shards.",
+    )
+    parser.add_argument(
+        "--shard-index",
+        type=int,
+        default=0,
+        help="Zero-based shard index when --shard-count > 1.",
+    )
+    parser.add_argument(
         "--provider",
         choices=["solana-rpc", "helius"],
         default="solana-rpc",
@@ -848,6 +892,12 @@ def main() -> int:
     args = parser.parse_args()
 
     refinement = _load_refinement(args.refinement_file)
+    if args.shard_count != 1 or args.shard_index != 0:
+        refinement = build_refinement_shard(
+            refinement,
+            shard_index=args.shard_index,
+            shard_count=args.shard_count,
+        )
     wallets = wallet_addresses_from_refinement(
         refinement,
         trader_only=True,
@@ -937,6 +987,8 @@ def main() -> int:
         ],
         "history_as_of_unix": report["history_as_of_unix"],
         "report_fingerprint": report["report_fingerprint"],
+        "shard_index": int(args.shard_index),
+        "shard_count": int(args.shard_count),
         "persisted": not args.dry_run,
     }, indent=2))
     return 0
