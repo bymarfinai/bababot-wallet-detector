@@ -1,0 +1,815 @@
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import time
+from pathlib import Path
+from typing import Any, Callable, Iterable
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+
+from research.wallet_s1_data_foundation import validate_solana_address
+from research.wallet_s10a0_wallet_universe_discovery import (
+    DEFAULT_MAX_SUPPORTED_TRANSACTION_VERSION,
+    DEFAULT_SOLANA_RPC_URL,
+    _safe_rpc_origin,
+)
+from research.wallet_s10a1_candidate_refinement import (
+    verify_candidate_refinement,
+    wallet_addresses_from_refinement,
+)
+from research.wallet_s10a_historical_backfill import (
+    build_causal_historical_replay,
+    collect_real_histories,
+    normalize_wallet_histories,
+    persist_stage10a_backfill,
+)
+from research.wallet_supabase_adapter import SupabaseRestClient
+
+STAGE10A1B_VERSION = "wallet-s10a1b-v1"
+DEFAULT_SIGNATURE_PAGE_LIMIT = 1000
+DEFAULT_MAX_SIGNATURE_PAGES_PER_WALLET = 1000
+DEFAULT_TRANSACTION_BATCH_SIZE = 20
+DEFAULT_RPC_ATTEMPTS = 5
+
+RpcTransport = Callable[
+    [str, str, dict[str, str], bytes],
+    tuple[int, bytes],
+]
+
+
+def _canonical_json(value: Any) -> str:
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+
+
+def _fingerprint(value: Any) -> str:
+    return hashlib.sha256(
+        _canonical_json(value).encode("utf-8")
+    ).hexdigest()
+
+
+def _default_transport(
+    method: str,
+    url: str,
+    headers: dict[str, str],
+    body: bytes,
+) -> tuple[int, bytes]:
+    request = Request(
+        url,
+        data=body,
+        headers=headers,
+        method=method,
+    )
+    with urlopen(request, timeout=60) as response:
+        return int(response.status), response.read()
+
+
+class SolanaWalletHistoryRpc:
+    """Provider-neutral finalized Solana wallet-history reader."""
+
+    def __init__(
+        self,
+        rpc_url: str,
+        *,
+        source_label: str = "solana-json-rpc",
+        transport: RpcTransport | None = None,
+        attempts: int = DEFAULT_RPC_ATTEMPTS,
+        max_supported_transaction_version: int = (
+            DEFAULT_MAX_SUPPORTED_TRANSACTION_VERSION
+        ),
+    ):
+        rpc_url = str(rpc_url or "").strip()
+        _safe_rpc_origin(rpc_url)
+        if not source_label.strip():
+            raise ValueError("source_label is required")
+        if int(attempts) < 1:
+            raise ValueError("attempts must be >= 1")
+        if int(max_supported_transaction_version) < 0:
+            raise ValueError(
+                "max_supported_transaction_version must be >= 0"
+            )
+
+        self.rpc_url = rpc_url
+        self.source_label = source_label.strip()
+        self.transport = transport or _default_transport
+        self.attempts = int(attempts)
+        self.max_supported_transaction_version = int(
+            max_supported_transaction_version
+        )
+        self._request_id = 0
+
+    @property
+    def public_origin(self) -> str:
+        return _safe_rpc_origin(self.rpc_url)
+
+    def _post(self, payload: Any) -> Any:
+        body = json.dumps(payload).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        last_error: Exception | None = None
+
+        for attempt in range(self.attempts):
+            try:
+                status, raw = self.transport(
+                    "POST",
+                    self.rpc_url,
+                    headers,
+                    body,
+                )
+                if not 200 <= int(status) < 300:
+                    raise RuntimeError(
+                        f"RPC HTTP status {status}: "
+                        f"{raw.decode('utf-8', errors='replace')}"
+                    )
+                return json.loads(raw.decode("utf-8"))
+            except (
+                HTTPError,
+                URLError,
+                TimeoutError,
+                RuntimeError,
+                json.JSONDecodeError,
+            ) as exc:
+                last_error = exc
+                if attempt == self.attempts - 1:
+                    break
+                time.sleep(min(2 ** attempt, 8))
+
+        raise RuntimeError(
+            f"RPC request failed after {self.attempts} attempts: "
+            f"{last_error}"
+        )
+
+    def rpc(self, method: str, params: list[Any]) -> Any:
+        self._request_id += 1
+        payload = {
+            "jsonrpc": "2.0",
+            "id": self._request_id,
+            "method": method,
+            "params": params,
+        }
+        response = self._post(payload)
+        if not isinstance(response, dict):
+            raise TypeError(f"RPC {method} response must be an object")
+        if response.get("error") is not None:
+            raise RuntimeError(
+                f"RPC {method} error: {response['error']}"
+            )
+        return response.get("result")
+
+    def rpc_batch(
+        self,
+        calls: list[tuple[str, list[Any]]],
+    ) -> list[Any]:
+        if not calls:
+            return []
+
+        payload: list[dict[str, Any]] = []
+        ids: list[int] = []
+        for method, params in calls:
+            self._request_id += 1
+            request_id = self._request_id
+            ids.append(request_id)
+            payload.append({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": method,
+                "params": params,
+            })
+
+        response = self._post(payload)
+        if not isinstance(response, list):
+            raise TypeError("RPC batch response must be an array")
+
+        by_id: dict[int, dict[str, Any]] = {}
+        for item in response:
+            if not isinstance(item, dict) or item.get("id") is None:
+                raise TypeError("invalid RPC batch response item")
+            by_id[int(item["id"])] = item
+
+        results: list[Any] = []
+        for request_id in ids:
+            item = by_id.get(request_id)
+            if item is None:
+                raise RuntimeError(
+                    f"RPC batch missing response id {request_id}"
+                )
+            if item.get("error") is not None:
+                raise RuntimeError(
+                    f"RPC batch error: {item['error']}"
+                )
+            results.append(item.get("result"))
+        return results
+
+    def first_available_block(self) -> int:
+        result = self.rpc("getFirstAvailableBlock", [])
+        if result is None:
+            raise RuntimeError("getFirstAvailableBlock returned null")
+        return int(result)
+
+    def signatures_page(
+        self,
+        wallet: str,
+        *,
+        limit: int,
+        before: str | None,
+    ) -> list[dict[str, Any]]:
+        config: dict[str, Any] = {
+            "commitment": "finalized",
+            "limit": int(limit),
+        }
+        if before:
+            config["before"] = before
+        result = self.rpc(
+            "getSignaturesForAddress",
+            [validate_solana_address(wallet), config],
+        )
+        if result is None:
+            raise RuntimeError(
+                "getSignaturesForAddress returned null"
+            )
+        if not isinstance(result, list):
+            raise TypeError(
+                "getSignaturesForAddress result must be an array"
+            )
+        return [dict(row) for row in result]
+
+    def transactions(
+        self,
+        signatures: Iterable[str],
+        *,
+        batch_size: int = DEFAULT_TRANSACTION_BATCH_SIZE,
+    ) -> dict[str, dict[str, Any]]:
+        ordered = list(dict.fromkeys(
+            str(signature)
+            for signature in signatures
+            if str(signature)
+        ))
+        if int(batch_size) < 1:
+            raise ValueError("batch_size must be >= 1")
+
+        output: dict[str, dict[str, Any]] = {}
+        for start in range(0, len(ordered), int(batch_size)):
+            batch = ordered[start:start + int(batch_size)]
+            config = {
+                "commitment": "finalized",
+                "encoding": "jsonParsed",
+                "maxSupportedTransactionVersion": (
+                    self.max_supported_transaction_version
+                ),
+            }
+            results = self.rpc_batch([
+                ("getTransaction", [signature, config])
+                for signature in batch
+            ])
+            for signature, result in zip(batch, results):
+                if result is None:
+                    raise RuntimeError(
+                        "getTransaction returned null for "
+                        f"{signature}; provider history is incomplete"
+                    )
+                if not isinstance(result, dict):
+                    raise TypeError(
+                        f"invalid getTransaction result for {signature}"
+                    )
+                transaction = result.get("transaction") or {}
+                signatures_result = (
+                    transaction.get("signatures") or []
+                )
+                if (
+                    not signatures_result
+                    or str(signatures_result[0]) != signature
+                ):
+                    raise ValueError(
+                        f"transaction signature mismatch for {signature}"
+                    )
+                output[signature] = dict(result)
+        return output
+
+
+def refinement_effective_after_unix(
+    refinement: dict[str, Any],
+) -> int:
+    verify_candidate_refinement(refinement)
+    times = [
+        int(event["block_time"])
+        for record in refinement.get("records") or []
+        for event in record.get("events") or []
+        if event.get("block_time") is not None
+    ]
+    if not times:
+        raise ValueError(
+            "refinement has no event timestamps for causal activation"
+        )
+    return max(times)
+
+
+def _fetch_wallet_signature_index(
+    source: SolanaWalletHistoryRpc,
+    wallet: str,
+    *,
+    as_of_unix: int,
+    page_limit: int,
+    max_pages: int,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    wallet = validate_solana_address(wallet)
+    if not 1 <= int(page_limit) <= 1000:
+        raise ValueError("page_limit must be between 1 and 1000")
+    if int(max_pages) < 1:
+        raise ValueError("max_pages must be >= 1")
+
+    before: str | None = None
+    pages = 0
+    exhausted = False
+    included: dict[str, dict[str, Any]] = {}
+    missing_block_time = 0
+
+    while pages < int(max_pages):
+        rows = source.signatures_page(
+            wallet,
+            limit=int(page_limit),
+            before=before,
+        )
+        pages += 1
+        if not rows:
+            exhausted = True
+            break
+
+        last_signature = str(rows[-1].get("signature") or "")
+        if not last_signature:
+            raise ValueError(
+                "signature pagination row missing signature"
+            )
+        if before is not None and last_signature == before:
+            raise RuntimeError(
+                f"signature pagination cursor did not advance for {wallet}"
+            )
+
+        for row in rows:
+            signature = str(row.get("signature") or "")
+            if not signature:
+                raise ValueError(
+                    "getSignaturesForAddress row missing signature"
+                )
+            block_time = row.get("blockTime")
+            if block_time is None:
+                missing_block_time += 1
+                continue
+            if int(block_time) <= int(as_of_unix):
+                existing = included.get(signature)
+                if existing is not None:
+                    if _canonical_json(existing) != _canonical_json(row):
+                        raise ValueError(
+                            f"conflicting signature row {signature}"
+                        )
+                    continue
+                included[signature] = dict(row)
+
+        before = last_signature
+        if len(rows) < int(page_limit):
+            exhausted = True
+            break
+
+    if not exhausted:
+        raise RuntimeError(
+            f"incomplete signature history for {wallet}: "
+            f"max_pages={max_pages} reached before pagination exhausted"
+        )
+
+    ordered = sorted(
+        included.values(),
+        key=lambda row: (
+            int(row.get("blockTime") or 0),
+            int(row.get("slot") or 0),
+            str(row.get("signature") or ""),
+        ),
+    )
+    times = [
+        int(row["blockTime"])
+        for row in ordered
+        if row.get("blockTime") is not None
+    ]
+    return ordered, {
+        "wallet": wallet,
+        "signature_pages_fetched": pages,
+        "signature_count_as_of": len(ordered),
+        "missing_block_time_signature_count": missing_block_time,
+        "signature_pagination_exhausted": True,
+        "first_signature_block_time": min(times) if times else None,
+        "last_signature_block_time": max(times) if times else None,
+    }
+
+
+def collect_solana_rpc_histories(
+    source: SolanaWalletHistoryRpc,
+    wallets: Iterable[str],
+    *,
+    as_of_unix: int,
+    signature_page_limit: int = DEFAULT_SIGNATURE_PAGE_LIMIT,
+    max_signature_pages_per_wallet: int = (
+        DEFAULT_MAX_SIGNATURE_PAGES_PER_WALLET
+    ),
+    transaction_batch_size: int = DEFAULT_TRANSACTION_BATCH_SIZE,
+    require_archive_from_genesis: bool = True,
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any]]:
+    as_of_unix = int(as_of_unix)
+    wallet_list = sorted({
+        validate_solana_address(wallet)
+        for wallet in wallets
+    })
+    if not wallet_list:
+        raise ValueError("at least one wallet is required")
+
+    first_available_slot = source.first_available_block()
+    archive_from_genesis = first_available_slot == 0
+    if require_archive_from_genesis and not archive_from_genesis:
+        raise RuntimeError(
+            "qualification-grade historical backfill requires a "
+            "provider whose getFirstAvailableBlock is 0; "
+            f"provider first available slot is {first_available_slot}"
+        )
+
+    signature_rows_by_wallet: dict[str, list[dict[str, Any]]] = {}
+    wallet_reports: list[dict[str, Any]] = []
+    all_signatures: list[str] = []
+
+    for wallet in wallet_list:
+        rows, report = _fetch_wallet_signature_index(
+            source,
+            wallet,
+            as_of_unix=as_of_unix,
+            page_limit=signature_page_limit,
+            max_pages=max_signature_pages_per_wallet,
+        )
+        signature_rows_by_wallet[wallet] = rows
+        wallet_reports.append(report)
+        all_signatures.extend(
+            str(row["signature"]) for row in rows
+        )
+
+    unique_signatures = list(dict.fromkeys(all_signatures))
+    tx_by_signature = source.transactions(
+        unique_signatures,
+        batch_size=transaction_batch_size,
+    )
+
+    raw_by_wallet: dict[str, list[dict[str, Any]]] = {}
+    for wallet in wallet_list:
+        txs: list[dict[str, Any]] = []
+        for signature_row in signature_rows_by_wallet[wallet]:
+            signature = str(signature_row["signature"])
+            tx = tx_by_signature.get(signature)
+            if tx is None:
+                raise RuntimeError(
+                    f"missing fetched transaction {signature}"
+                )
+            block_time = tx.get("blockTime")
+            if block_time is None:
+                raise RuntimeError(
+                    f"transaction {signature} has no blockTime"
+                )
+            if int(block_time) > as_of_unix:
+                raise RuntimeError(
+                    f"transaction {signature} exceeds as-of cutoff"
+                )
+            txs.append(dict(tx))
+
+        raw_by_wallet[wallet] = sorted(
+            txs,
+            key=lambda tx: (
+                int(tx.get("blockTime") or 0),
+                int(tx.get("slot") or 0),
+                str(
+                    (tx.get("transaction") or {})
+                    .get("signatures", [""])[0]
+                ),
+            ),
+        )
+
+    for report in wallet_reports:
+        wallet = str(report["wallet"])
+        report["transaction_count_as_of"] = len(
+            raw_by_wallet[wallet]
+        )
+        report["history_complete"] = (
+            bool(report["signature_pagination_exhausted"])
+            and (
+                archive_from_genesis
+                or not require_archive_from_genesis
+            )
+        )
+
+    report = {
+        "provider": "solana_json_rpc",
+        "source_label": source.source_label,
+        "source_origin": source.public_origin,
+        "history_as_of_unix": as_of_unix,
+        "provider_first_available_slot": first_available_slot,
+        "provider_archive_from_genesis": archive_from_genesis,
+        "qualification_grade": (
+            archive_from_genesis
+            and all(
+                bool(row["signature_pagination_exhausted"])
+                for row in wallet_reports
+            )
+        ),
+        "wallet_count": len(wallet_list),
+        "wallet_reports": wallet_reports,
+        "unique_signature_count": len(unique_signatures),
+        "raw_transaction_rows_across_wallets": sum(
+            len(rows) for rows in raw_by_wallet.values()
+        ),
+    }
+    return raw_by_wallet, report
+
+
+def collect_helius_histories_as_of(
+    api_key: str,
+    wallets: Iterable[str],
+    *,
+    as_of_unix: int,
+    page_limit: int = 100,
+    max_pages_per_wallet: int = 1000,
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any]]:
+    raw, report = collect_real_histories(
+        api_key,
+        wallets,
+        page_limit=page_limit,
+        max_pages_per_wallet=max_pages_per_wallet,
+    )
+    filtered: dict[str, list[dict[str, Any]]] = {}
+    excluded_future = 0
+
+    for wallet, rows in sorted(raw.items()):
+        kept: list[dict[str, Any]] = []
+        for tx in rows:
+            block_time = tx.get("blockTime")
+            if block_time is None:
+                continue
+            if int(block_time) <= int(as_of_unix):
+                kept.append(dict(tx))
+            else:
+                excluded_future += 1
+        filtered[wallet] = kept
+
+    return filtered, {
+        **report,
+        "provider": "helius_gtfa",
+        "history_as_of_unix": int(as_of_unix),
+        "excluded_post_as_of_transaction_count": excluded_future,
+        "qualification_grade": bool(
+            report.get("history_complete_for_all_wallets")
+        ),
+    }
+
+
+def _load_refinement(path: str | Path) -> dict[str, Any]:
+    parsed = json.loads(Path(path).read_text(encoding="utf-8"))
+    refinement = (
+        parsed.get("refinement")
+        if isinstance(parsed, dict) and "refinement" in parsed
+        else parsed
+    )
+    if not isinstance(refinement, dict):
+        raise ValueError(
+            "refinement file must contain a Stage-10A-1A object"
+        )
+    verify_candidate_refinement(refinement)
+    return refinement
+
+
+def build_stage10a1b_report(
+    refinement: dict[str, Any],
+    *,
+    raw_by_wallet: dict[str, list[dict[str, Any]]],
+    fetch_report: dict[str, Any],
+    history_as_of_unix: int,
+    signal_from_unix: int | None = None,
+    signal_to_unix: int | None = None,
+) -> tuple[
+    dict[str, Any],
+    dict[str, list[dict[str, Any]]],
+    dict[str, Any],
+]:
+    effective_after = refinement_effective_after_unix(refinement)
+    history_as_of_unix = int(history_as_of_unix)
+
+    if history_as_of_unix <= effective_after:
+        raise ValueError(
+            "history_as_of_unix must be strictly after the "
+            "discovery/refinement activation time"
+        )
+    if signal_from_unix is None:
+        signal_from_unix = effective_after + 1
+    if signal_to_unix is None:
+        signal_to_unix = history_as_of_unix
+
+    normalized, normalization_report = normalize_wallet_histories(
+        raw_by_wallet
+    )
+    replay = build_causal_historical_replay(
+        normalized,
+        signal_from_unix=int(signal_from_unix),
+        signal_to_unix=int(signal_to_unix),
+        universe_effective_after_unix=effective_after,
+    )
+
+    report_core = {
+        "version": STAGE10A1B_VERSION,
+        "source_kind": "REAL",
+        "source_refinement_fingerprint": refinement[
+            "refinement_fingerprint"
+        ],
+        "universe_effective_after_unix": effective_after,
+        "history_as_of_unix": history_as_of_unix,
+        "fetch": fetch_report,
+        "normalization": normalization_report,
+        "causal_replay": replay,
+        "edge_claim": None,
+        "production_rule_selected": False,
+    }
+    report = {
+        **report_core,
+        "report_fingerprint": _fingerprint(report_core),
+    }
+    return report, normalized, replay
+
+
+def _write_json(path: str | Path, value: Any) -> None:
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True)
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Stage 10A-1B real causal historical backfill for "
+            "Stage-10A-1A trader candidates"
+        )
+    )
+    parser.add_argument("--refinement-file", required=True)
+    parser.add_argument(
+        "--provider",
+        choices=["solana-rpc", "helius"],
+        default="solana-rpc",
+    )
+    parser.add_argument(
+        "--history-as-of-unix",
+        type=int,
+        required=True,
+        help="Latest historical timestamp allowed into this backfill.",
+    )
+    parser.add_argument("--signal-from-unix", type=int, default=None)
+    parser.add_argument("--signal-to-unix", type=int, default=None)
+    parser.add_argument(
+        "--rpc-url",
+        default=(
+            os.environ.get("SOLANA_RPC_URL")
+            or DEFAULT_SOLANA_RPC_URL
+        ),
+    )
+    parser.add_argument(
+        "--source-label",
+        default=os.environ.get(
+            "SOLANA_RPC_SOURCE_LABEL",
+            "solana-json-rpc",
+        ),
+    )
+    parser.add_argument(
+        "--signature-page-limit",
+        type=int,
+        default=DEFAULT_SIGNATURE_PAGE_LIMIT,
+    )
+    parser.add_argument(
+        "--max-signature-pages-per-wallet",
+        type=int,
+        default=DEFAULT_MAX_SIGNATURE_PAGES_PER_WALLET,
+    )
+    parser.add_argument(
+        "--transaction-batch-size",
+        type=int,
+        default=DEFAULT_TRANSACTION_BATCH_SIZE,
+    )
+    parser.add_argument(
+        "--allow-provider-retention-gap",
+        action="store_true",
+        help=(
+            "Allow native RPC whose first available block is >0. "
+            "Output is not qualification-grade when used."
+        ),
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Build report but do not write Supabase.",
+    )
+    parser.add_argument("--out", required=True)
+    args = parser.parse_args()
+
+    refinement = _load_refinement(args.refinement_file)
+    wallets = wallet_addresses_from_refinement(
+        refinement,
+        trader_only=True,
+    )
+    if not wallets:
+        raise SystemExit("no TRADER_CANDIDATE wallets to backfill")
+
+    raw_source: str
+    if args.provider == "solana-rpc":
+        source = SolanaWalletHistoryRpc(
+            args.rpc_url,
+            source_label=args.source_label,
+        )
+        raw_by_wallet, fetch_report = collect_solana_rpc_histories(
+            source,
+            wallets,
+            as_of_unix=args.history_as_of_unix,
+            signature_page_limit=args.signature_page_limit,
+            max_signature_pages_per_wallet=(
+                args.max_signature_pages_per_wallet
+            ),
+            transaction_batch_size=args.transaction_batch_size,
+            require_archive_from_genesis=(
+                not args.allow_provider_retention_gap
+            ),
+        )
+        raw_source = "solana_json_rpc"
+    else:
+        api_key = os.environ.get("HELIUS_API_KEY")
+        if not api_key:
+            raise SystemExit(
+                "HELIUS_API_KEY is required when --provider helius"
+            )
+        raw_by_wallet, fetch_report = collect_helius_histories_as_of(
+            api_key,
+            wallets,
+            as_of_unix=args.history_as_of_unix,
+        )
+        raw_source = "helius_gtfa"
+
+    report, normalized, replay = build_stage10a1b_report(
+        refinement,
+        raw_by_wallet=raw_by_wallet,
+        fetch_report=fetch_report,
+        history_as_of_unix=args.history_as_of_unix,
+        signal_from_unix=args.signal_from_unix,
+        signal_to_unix=args.signal_to_unix,
+    )
+
+    persistence = None
+    if not args.dry_run:
+        if not bool(fetch_report.get("qualification_grade")):
+            raise RuntimeError(
+                "refusing Supabase production persistence from a "
+                "non-qualification-grade history source"
+            )
+        client = SupabaseRestClient.from_env()
+        persistence = persist_stage10a_backfill(
+            client,
+            raw_by_wallet=raw_by_wallet,
+            normalized_by_wallet=normalized,
+            replay=replay,
+            raw_source=raw_source,
+        )
+
+    output = {
+        "backfill": report,
+        "supabase_persistence": persistence,
+        "dry_run": bool(args.dry_run),
+    }
+    _write_json(args.out, output)
+    print(json.dumps({
+        "version": report["version"],
+        "provider": fetch_report.get("provider"),
+        "qualification_grade": fetch_report.get(
+            "qualification_grade"
+        ),
+        "wallet_count": fetch_report.get("wallet_count"),
+        "raw_transaction_rows": fetch_report.get(
+            "raw_transaction_rows_across_wallets"
+        ),
+        "normalized_event_count": report[
+            "normalization"
+        ]["normalized_event_count"],
+        "universe_effective_after_unix": report[
+            "universe_effective_after_unix"
+        ],
+        "history_as_of_unix": report["history_as_of_unix"],
+        "report_fingerprint": report["report_fingerprint"],
+        "persisted": not args.dry_run,
+    }, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
