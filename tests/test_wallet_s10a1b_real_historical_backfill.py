@@ -1,5 +1,7 @@
 import json
+import tempfile
 import unittest
+from pathlib import Path
 
 from research.wallet_s2_transaction_normalizer import USDC_MINT
 from research.wallet_s10a0_wallet_universe_discovery import (
@@ -12,9 +14,11 @@ from research.wallet_s10a1b_real_historical_backfill import (
     SolanaWalletHistoryRpc,
     build_refinement_shard,
     build_refinement_subset,
+    build_stage10a1b_evidence_report,
     build_stage10a1b_report,
     collect_solana_rpc_histories,
     refinement_effective_after_unix,
+    write_stage10a1b_evidence_bundle,
 )
 from research.wallet_s10a_historical_backfill import (
     build_causal_historical_replay,
@@ -479,6 +483,67 @@ class Stage10A1BRealBackfillTests(unittest.TestCase):
                 as_of_unix=1000,
                 signature_page_limit=1000,
             )
+
+    def test_evidence_report_stops_before_stage3_to5(self):
+        refinement = refinement_fixture()
+        raw = {WALLET_A: [raw_tx("old", 900)]}
+        report, normalized = build_stage10a1b_evidence_report(
+            refinement,
+            raw_by_wallet=raw,
+            fetch_report={
+                "provider": "solana_json_rpc",
+                "qualification_grade": True,
+                "wallet_count": 1,
+                "raw_transaction_rows_across_wallets": 1,
+            },
+            history_as_of_unix=1100,
+        )
+        self.assertEqual(
+            report["mode"],
+            "HISTORICAL_EVIDENCE_BACKFILL",
+        )
+        self.assertFalse(report["stage3_to_stage5_executed"])
+        self.assertEqual(
+            report["normalization"]["normalized_event_count"],
+            1,
+        )
+        self.assertIn(WALLET_A, normalized)
+        self.assertNotIn("causal_replay", report)
+
+    def test_evidence_bundle_writes_auditable_files(self):
+        refinement = refinement_fixture()
+        raw = {WALLET_A: [raw_tx("old", 900)]}
+        report, normalized = build_stage10a1b_evidence_report(
+            refinement,
+            raw_by_wallet=raw,
+            fetch_report={
+                "provider": "solana_json_rpc",
+                "qualification_grade": True,
+                "wallet_count": 1,
+                "raw_transaction_rows_across_wallets": 1,
+            },
+            history_as_of_unix=1100,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest = write_stage10a1b_evidence_bundle(
+                tmp,
+                report=report,
+                raw_by_wallet=raw,
+                normalized_by_wallet=normalized,
+                raw_source="solana_json_rpc",
+            )
+            root = Path(tmp)
+            self.assertTrue((root / "manifest.json").exists())
+            self.assertTrue((root / "raw.jsonl").exists())
+            self.assertTrue((root / "normalized.jsonl").exists())
+            self.assertTrue((root / "report.json").exists())
+            self.assertEqual(manifest["wallet_count"], 1)
+            self.assertEqual(manifest["raw_transaction_rows"], 1)
+            raw_line = json.loads(
+                (root / "raw.jsonl").read_text().splitlines()[0]
+            )
+            self.assertEqual(raw_line["wallet"], WALLET_A)
+            self.assertEqual(raw_line["source"], "solana_json_rpc")
 
     def test_stage10a1b_report_carries_causal_activation(self):
         refinement = refinement_fixture()
