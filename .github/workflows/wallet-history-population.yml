@@ -11,7 +11,7 @@ jobs:
   prepare:
     runs-on: ubuntu-latest
     outputs:
-      history_as_of_unix: \${{ steps.freeze.outputs.history_as_of_unix }}
+      history_as_of_unix: ${{ steps.freeze.outputs.history_as_of_unix }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -83,25 +83,25 @@ jobs:
           path: /tmp/input
       - name: Backfill shard from real Solana history
         run: |
-          mkdir -p "/tmp/stage10a1b/shard-\${{ matrix.shard }}"
+          mkdir -p "/tmp/stage10a1b/shard-${{ matrix.shard }}"
           python -m research.wallet_s10a1b_real_historical_backfill \
             --refinement-file /tmp/input/stage10a1a.json \
             --provider solana-rpc \
-            --history-as-of-unix "\${{ needs.prepare.outputs.history_as_of_unix }}" \
+            --history-as-of-unix "${{ needs.prepare.outputs.history_as_of_unix }}" \
             --shard-count 8 \
-            --shard-index "\${{ matrix.shard }}" \
+            --shard-index "${{ matrix.shard }}" \
             --signature-page-limit 1000 \
             --max-signature-pages-per-wallet 5 \
             --transaction-batch-size 1 \
             --evidence-only \
-            --evidence-dir "/tmp/stage10a1b/shard-\${{ matrix.shard }}/evidence" \
+            --evidence-dir "/tmp/stage10a1b/shard-${{ matrix.shard }}/evidence" \
             --dry-run \
-            --out "/tmp/stage10a1b/shard-\${{ matrix.shard }}/result.json"
+            --out "/tmp/stage10a1b/shard-${{ matrix.shard }}/result.json"
       - name: Upload shard evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: stage10a1b-shard-\${{ matrix.shard }}
-          path: /tmp/stage10a1b/shard-\${{ matrix.shard }}
+          name: stage10a1b-shard-${{ matrix.shard }}
+          path: /tmp/stage10a1b/shard-${{ matrix.shard }}
           if-no-files-found: warn
           retention-days: 14
