@@ -292,6 +292,76 @@ class SolanaWalletHistoryRpc:
         return output
 
 
+def build_refinement_subset(
+    refinement: dict[str, Any],
+    wallets: Iterable[str],
+) -> dict[str, Any]:
+    """Create a deterministic trader-only refinement shard/subset."""
+    verify_candidate_refinement(refinement)
+    wanted = {
+        validate_solana_address(wallet)
+        for wallet in wallets
+    }
+    if not wanted:
+        raise ValueError("refinement subset requires at least one wallet")
+
+    source_records = {
+        str(row["wallet"]): row
+        for row in refinement.get("records") or []
+        if bool(row.get("trader_candidate"))
+    }
+    missing = sorted(wanted - set(source_records))
+    if missing:
+        raise ValueError(
+            "refinement subset contains non-trader or unknown wallet: "
+            + ",".join(missing)
+        )
+
+    records = [
+        dict(source_records[wallet])
+        for wallet in sorted(wanted)
+    ]
+    subset_core = {
+        "version": refinement["version"],
+        "chain": refinement.get("chain") or "solana",
+        "source_universe_fingerprint": refinement[
+            "source_universe_fingerprint"
+        ],
+        "parent_refinement_fingerprint": refinement[
+            "refinement_fingerprint"
+        ],
+        "source": dict(refinement.get("source") or {}),
+        "activity_candidate_wallet_count": len(records),
+        "trader_candidate_wallet_count": len(records),
+        "non_trader_activity_wallet_count": 0,
+        "meme_buy_candidate_wallet_count": sum(
+            int(bool(row.get("meme_buy_candidate")))
+            for row in records
+        ),
+        "trader_event_count": sum(
+            int(row.get("trader_event_count") or 0)
+            for row in records
+        ),
+        "buy_event_count": sum(
+            int(row.get("buy_event_count") or 0)
+            for row in records
+        ),
+        "sell_event_count": sum(
+            int(row.get("sell_event_count") or 0)
+            for row in records
+        ),
+        "records": records,
+        "contract": {
+            **dict(refinement.get("contract") or {}),
+            "population_scope": "TRADER_CANDIDATE_SUBSET",
+        },
+    }
+    return {
+        **subset_core,
+        "refinement_fingerprint": _fingerprint(subset_core),
+    }
+
+
 def refinement_effective_after_unix(
     refinement: dict[str, Any],
 ) -> int:
@@ -598,6 +668,24 @@ def build_stage10a1b_report(
 ]:
     effective_after = refinement_effective_after_unix(refinement)
     history_as_of_unix = int(history_as_of_unix)
+
+    expected_wallets = set(
+        wallet_addresses_from_refinement(
+            refinement,
+            trader_only=True,
+        )
+    )
+    actual_wallets = {
+        validate_solana_address(wallet)
+        for wallet in raw_by_wallet
+    }
+    if actual_wallets != expected_wallets:
+        missing = sorted(expected_wallets - actual_wallets)
+        extra = sorted(actual_wallets - expected_wallets)
+        raise ValueError(
+            "historical backfill wallet coverage does not match "
+            f"refinement; missing={missing} extra={extra}"
+        )
 
     if history_as_of_unix <= effective_after:
         raise ValueError(
