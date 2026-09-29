@@ -10,6 +10,7 @@ from research.wallet_s10a1_candidate_refinement import (
 )
 from research.wallet_s10a1b_real_historical_backfill import (
     SolanaWalletHistoryRpc,
+    build_refinement_subset,
     build_stage10a1b_report,
     collect_solana_rpc_histories,
     refinement_effective_after_unix,
@@ -411,6 +412,40 @@ class Stage10A1BRealBackfillTests(unittest.TestCase):
         self.assertEqual(replay["signal_from_unix"], 1001)
         self.assertEqual(report["source_kind"], "REAL")
         self.assertIn(WALLET_A, normalized)
+
+    def test_refinement_subset_is_explicit_and_deterministic(self):
+        refinement = refinement_fixture()
+        subset = build_refinement_subset(
+            refinement,
+            [WALLET_A],
+        )
+        self.assertEqual(subset["trader_candidate_wallet_count"], 1)
+        self.assertEqual(subset["non_trader_activity_wallet_count"], 0)
+        self.assertEqual(
+            subset["parent_refinement_fingerprint"],
+            refinement["refinement_fingerprint"],
+        )
+        self.assertEqual(
+            subset["refinement_fingerprint"],
+            build_refinement_subset(
+                refinement,
+                [WALLET_A],
+            )["refinement_fingerprint"],
+        )
+
+    def test_report_rejects_partial_cohort_coverage(self):
+        refinement = refinement_fixture()
+        with self.assertRaises(ValueError):
+            build_stage10a1b_report(
+                refinement,
+                raw_by_wallet={},
+                fetch_report={
+                    "provider": "solana_json_rpc",
+                    "qualification_grade": True,
+                    "wallet_count": 0,
+                },
+                history_as_of_unix=1100,
+            )
 
     def test_raw_history_source_is_provider_neutral(self):
         tx = raw_tx("sig", 900)
