@@ -294,20 +294,25 @@ def candidate_refinement_rows(
 def raw_wallet_transaction_row(
     wallet: str,
     tx: dict[str, Any],
+    *,
+    source: str = "helius_gtfa",
 ) -> dict[str, Any]:
     wallet = str(wallet or "")
     transaction = tx.get("transaction") or {}
     signatures = transaction.get("signatures") or []
     signature = str(signatures[0]) if signatures else ""
+    source = str(source or "").strip()
     if not wallet or not signature:
         raise ValueError(
             "historical raw transaction requires wallet and signature"
         )
+    if not source:
+        raise ValueError("historical raw transaction requires source")
     return {
         "wallet": wallet,
         "signature": signature,
         "chain": "solana",
-        "source": "helius_gtfa",
+        "source": source,
         "slot": tx.get("slot"),
         "block_time_unix": tx.get("blockTime"),
         "raw_payload": tx,
@@ -667,9 +672,15 @@ class SupabaseRestClient:
     def persist_historical_raw(
         self,
         raw_by_wallet: dict[str, Iterable[dict[str, Any]]],
+        *,
+        source: str = "helius_gtfa",
     ) -> int:
         rows = [
-            raw_wallet_transaction_row(wallet, tx)
+            raw_wallet_transaction_row(
+                wallet,
+                tx,
+                source=source,
+            )
             for wallet, transactions in sorted(raw_by_wallet.items())
             for tx in transactions
         ]
