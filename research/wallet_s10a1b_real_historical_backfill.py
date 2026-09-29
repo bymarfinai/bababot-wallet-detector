@@ -84,6 +84,7 @@ class SolanaWalletHistoryRpc:
         max_supported_transaction_version: int = (
             DEFAULT_MAX_SUPPORTED_TRANSACTION_VERSION
         ),
+        min_request_interval_seconds: float = 0.0,
     ):
         rpc_url = str(rpc_url or "").strip()
         _safe_rpc_origin(rpc_url)
@@ -95,6 +96,10 @@ class SolanaWalletHistoryRpc:
             raise ValueError(
                 "max_supported_transaction_version must be >= 0"
             )
+        if float(min_request_interval_seconds) < 0:
+            raise ValueError(
+                "min_request_interval_seconds must be >= 0"
+            )
 
         self.rpc_url = rpc_url
         self.source_label = source_label.strip()
@@ -103,7 +108,24 @@ class SolanaWalletHistoryRpc:
         self.max_supported_transaction_version = int(
             max_supported_transaction_version
         )
+        self.min_request_interval_seconds = float(
+            min_request_interval_seconds
+        )
+        self._last_request_started_at: float | None = None
         self._request_id = 0
+
+    def _pace_request(self) -> None:
+        interval = self.min_request_interval_seconds
+        if interval <= 0:
+            return
+        now = time.monotonic()
+        if self._last_request_started_at is not None:
+            remaining = interval - (
+                now - self._last_request_started_at
+            )
+            if remaining > 0:
+                time.sleep(remaining)
+        self._last_request_started_at = time.monotonic()
 
     @property
     def public_origin(self) -> str:
@@ -124,6 +146,7 @@ class SolanaWalletHistoryRpc:
 
         for attempt in range(attempt_count):
             try:
+                self._pace_request()
                 status, raw = self.transport(
                     "POST",
                     self.rpc_url,
@@ -1174,6 +1197,16 @@ def main() -> int:
         default=DEFAULT_TRANSACTION_BATCH_SIZE,
     )
     parser.add_argument(
+        "--rpc-min-request-interval-ms",
+        type=float,
+        default=0.0,
+        help=(
+            "Minimum spacing between native RPC HTTP requests. "
+            "Useful for rate-limited public endpoints; 300ms is "
+            "approximately 3.3 requests/second."
+        ),
+    )
+    parser.add_argument(
         "--allow-provider-retention-gap",
         action="store_true",
         help=(
@@ -1222,6 +1255,9 @@ def main() -> int:
         source = SolanaWalletHistoryRpc(
             args.rpc_url,
             source_label=args.source_label,
+            min_request_interval_seconds=(
+                float(args.rpc_min_request_interval_ms) / 1000.0
+            ),
         )
         raw_by_wallet, fetch_report = collect_solana_rpc_histories(
             source,
