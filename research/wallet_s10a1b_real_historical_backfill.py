@@ -146,21 +146,37 @@ class SolanaWalletHistoryRpc:
         )
 
     def rpc(self, method: str, params: list[Any]) -> Any:
-        self._request_id += 1
-        payload = {
-            "jsonrpc": "2.0",
-            "id": self._request_id,
-            "method": method,
-            "params": params,
-        }
-        response = self._post(payload)
-        if not isinstance(response, dict):
-            raise TypeError(f"RPC {method} response must be an object")
-        if response.get("error") is not None:
+        last_error: dict[str, Any] | None = None
+        for attempt in range(self.attempts):
+            self._request_id += 1
+            payload = {
+                "jsonrpc": "2.0",
+                "id": self._request_id,
+                "method": method,
+                "params": params,
+            }
+            response = self._post(payload)
+            if not isinstance(response, dict):
+                raise TypeError(
+                    f"RPC {method} response must be an object"
+                )
+            error = response.get("error")
+            if error is None:
+                return response.get("result")
+            last_error = dict(error) if isinstance(error, dict) else {
+                "message": str(error)
+            }
+            code = last_error.get("code")
+            if code == 429 and attempt < self.attempts - 1:
+                time.sleep(min(2 ** attempt, 8))
+                continue
             raise RuntimeError(
-                f"RPC {method} error: {response['error']}"
+                f"RPC {method} error: {last_error}"
             )
-        return response.get("result")
+        raise RuntimeError(
+            f"RPC {method} rate-limited after {self.attempts} attempts: "
+            f"{last_error}"
+        )
 
     def rpc_batch(
         self,
@@ -254,41 +270,68 @@ class SolanaWalletHistoryRpc:
             raise ValueError("batch_size must be >= 1")
 
         output: dict[str, dict[str, Any]] = {}
+        config = {
+            "commitment": "finalized",
+            "encoding": "jsonParsed",
+            "maxSupportedTransactionVersion": (
+                self.max_supported_transaction_version
+            ),
+        }
+
+        def store(signature: str, result: Any) -> None:
+            if result is None:
+                raise RuntimeError(
+                    "getTransaction returned null for "
+                    f"{signature}; provider history is incomplete"
+                )
+            if not isinstance(result, dict):
+                raise TypeError(
+                    f"invalid getTransaction result for {signature}"
+                )
+            transaction = result.get("transaction") or {}
+            signatures_result = transaction.get("signatures") or []
+            if (
+                not signatures_result
+                or str(signatures_result[0]) != signature
+            ):
+                raise ValueError(
+                    f"transaction signature mismatch for {signature}"
+                )
+            output[signature] = dict(result)
+
         for start in range(0, len(ordered), int(batch_size)):
             batch = ordered[start:start + int(batch_size)]
-            config = {
-                "commitment": "finalized",
-                "encoding": "jsonParsed",
-                "maxSupportedTransactionVersion": (
-                    self.max_supported_transaction_version
-                ),
-            }
-            results = self.rpc_batch([
-                ("getTransaction", [signature, config])
-                for signature in batch
-            ])
-            for signature, result in zip(batch, results):
-                if result is None:
-                    raise RuntimeError(
-                        "getTransaction returned null for "
-                        f"{signature}; provider history is incomplete"
-                    )
-                if not isinstance(result, dict):
-                    raise TypeError(
-                        f"invalid getTransaction result for {signature}"
-                    )
-                transaction = result.get("transaction") or {}
-                signatures_result = (
-                    transaction.get("signatures") or []
+
+            if len(batch) == 1:
+                signature = batch[0]
+                result = self.rpc(
+                    "getTransaction",
+                    [signature, config],
                 )
-                if (
-                    not signatures_result
-                    or str(signatures_result[0]) != signature
-                ):
-                    raise ValueError(
-                        f"transaction signature mismatch for {signature}"
+                store(signature, result)
+                continue
+
+            try:
+                results = self.rpc_batch([
+                    ("getTransaction", [signature, config])
+                    for signature in batch
+                ])
+                for signature, result in zip(batch, results):
+                    store(signature, result)
+            except RuntimeError as exc:
+                message = str(exc)
+                if "429" not in message and "Too many requests" not in message:
+                    raise
+                # Public Solana RPC commonly rejects bursty getTransaction
+                # batches even when ordinary single requests are accepted.
+                # Fall back to the rate-limit-aware scalar RPC path.
+                for signature in batch:
+                    result = self.rpc(
+                        "getTransaction",
+                        [signature, config],
                     )
-                output[signature] = dict(result)
+                    store(signature, result)
+
         return output
 
 
