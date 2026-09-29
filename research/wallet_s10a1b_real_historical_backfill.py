@@ -732,10 +732,23 @@ def _validate_backfill_wallet_coverage(
     refinement: dict[str, Any],
     raw_by_wallet: dict[str, Iterable[dict[str, Any]]],
 ) -> None:
-    _validate_backfill_wallet_coverage(
-        refinement,
-        raw_by_wallet,
+    expected_wallets = set(
+        wallet_addresses_from_refinement(
+            refinement,
+            trader_only=True,
+        )
     )
+    actual_wallets = {
+        validate_solana_address(wallet)
+        for wallet in raw_by_wallet
+    }
+    if actual_wallets != expected_wallets:
+        missing = sorted(expected_wallets - actual_wallets)
+        extra = sorted(actual_wallets - expected_wallets)
+        raise ValueError(
+            "historical backfill wallet coverage does not match "
+            f"refinement; missing={missing} extra={extra}"
+        )
 
 
 def build_stage10a1b_evidence_report(
