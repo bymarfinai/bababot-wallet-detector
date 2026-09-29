@@ -73,7 +73,9 @@ No consumer is required for Wallet Detector itself to work.
 | 8.5 | PASS | Vercel dashboard / UI |
 | 9 | PASS | Smart-money signal output layer |
 | 10A-0 | PASS | Automatic wallet universe discovery from real Solana activity; real mainnet smoke PASS |
-| 10A-1 | PASS ENGINE | Supabase causal historical backfill; real causal population is next |
+| 10A-1A | PASS | Stage-2 trader/meme candidate refinement before full backfill |
+| 10A-1B | NEXT | Real causal historical backfill for trader candidates |
+| 10A-1C | PENDING | Stage 3–5 qualification on real populated histories |
 | 10B | PENDING | Real token OHLC ingestion |
 | 10C | PENDING | Real empirical A/B/C/D/E replay |
 | 11 | PLANNED | Validation + rule optimization + S4/S5 calibration |
@@ -544,7 +546,7 @@ deterministic replay fingerprints
 Full Python regression:
 
 ```text
-211 / 211 PASS
+220 / 220 PASS
 ```
 
 ### Stage 10A-0 — Automatic wallet universe discovery
@@ -605,7 +607,52 @@ docs/WALLET_STAGE10A0_AUTOMATIC_WALLET_UNIVERSE_DISCOVERY_Result.md
 docs/WALLET_STAGE10A0_AUTOMATIC_WALLET_UNIVERSE_DISCOVERY_Status.txt
 ```
 
-### Stage 10A-1 — Supabase causal historical backfill
+### Stage 10A-1A — Trader + Meme Candidate Refinement
+
+**PASS.**
+
+Raw activity candidates are now refined through the existing Stage-2 normalizer before expensive full historical backfill.
+
+```text
+ACTIVITY_CANDIDATE
+↓
+Stage-2
+↓
+SWAP + BUY/SELL?
+├─ NO  → NON_TRADER_ACTIVITY
+└─ YES → TRADER_CANDIDATE
+          ├─ BUY  → MEME_BUY_CANDIDATE
+          └─ SELL → normal trader candidate
+```
+
+This stage does **not** use ROI, win rate, PnL, minimum trade count, or future returns.
+
+Latest real-mainnet smoke:
+
+```text
+GitHub Actions run = 36507032007
+finalized blocks   = 2
+transactions       = 2,270
+activity candidates= 250
+trader candidates  = 212
+non-trader activity= 38
+meme-buy candidates= 130
+BUY events         = 133
+SELL events        = 89
+```
+
+MEME_BUY_CANDIDATE is only a causal seed for future Stage-6 explosion analysis; it is not yet a Meme Hunter label.
+
+The historical backfill runner now accepts --refinement-file and only hands TRADER_CANDIDATE wallets into the expensive historical reconstruction path.
+
+See:
+
+```text
+docs/WALLET_STAGE10A1A_CANDIDATE_REFINEMENT_Result.md
+docs/WALLET_STAGE10A1A_CANDIDATE_REFINEMENT_Status.txt
+```
+
+### Stage 10A-1B — Supabase causal historical backfill
 
 Implemented:
 
@@ -858,6 +905,8 @@ docs/
 ├── WALLET_STAGE10A0_AUTOMATIC_WALLET_UNIVERSE_DISCOVERY_Preregistration.md
 ├── WALLET_STAGE10A0_AUTOMATIC_WALLET_UNIVERSE_DISCOVERY_Result.md
 ├── WALLET_STAGE10A0_AUTOMATIC_WALLET_UNIVERSE_DISCOVERY_Status.txt
+├── WALLET_STAGE10A1A_CANDIDATE_REFINEMENT_Result.md
+├── WALLET_STAGE10A1A_CANDIDATE_REFINEMENT_Status.txt
 ├── WALLET_STAGE10A_SUPABASE_CAUSAL_BACKFILL_Result.md
 └── WALLET_STAGE10A_SUPABASE_CAUSAL_BACKFILL_Status.txt
 
@@ -877,6 +926,7 @@ research/
 ├── wallet_s10_paper_trading.py
 ├── wallet_s10_replay_activation.py
 ├── wallet_s10a0_wallet_universe_discovery.py
+├── wallet_s10a1_candidate_refinement.py
 ├── wallet_s10a_historical_backfill.py
 └── wallet_supabase_adapter.py
 
@@ -895,13 +945,15 @@ tests/
 ├── test_wallet_s10_paper_trading.py
 ├── test_wallet_s10_replay_activation.py
 ├── test_wallet_s10a0_wallet_universe_discovery.py
+├── test_wallet_s10a1_candidate_refinement.py
 └── test_wallet_s10a_historical_backfill.py
 
 supabase/
 └── migrations/
     ├── 20260928071800_wallet_detector_stage10_core.sql
     ├── 20260928074000_wallet_detector_stage10a_history_evidence.sql
-    └── 20260928223000_wallet_detector_stage10a0_universe_discovery.sql
+    ├── 20260928223000_wallet_detector_stage10a0_universe_discovery.sql
+    └── 20260929072000_wallet_detector_stage10a1a_candidate_refinement.sql
 
 package.json
 tsconfig.json
@@ -937,7 +989,18 @@ SOLANA_RPC_SOURCE_LABEL=<provider label>
 
 Persist the universe to Supabase by adding `--persist-supabase` with the server-side Supabase credential configured.
 
-## Run Stage 10A-1 causal historical backfill
+## Run Stage 10A-1A candidate refinement
+
+```bash
+python -m research.wallet_s10a1_candidate_refinement \
+  --universe-file outputs/stage10a0/universe.json \
+  --require-trader-candidates \
+  --out outputs/stage10a1a/refinement.json
+```
+
+Optional Supabase persistence: add --persist-supabase.
+
+## Run Stage 10A-1B causal historical backfill
 
 Server-side environment:
 
@@ -951,7 +1014,7 @@ Example:
 
 ```bash
 python -m research.wallet_s10a_historical_backfill \
-  --universe-file outputs/stage10a0/universe.json \
+  --refinement-file outputs/stage10a1a/refinement.json \
   --signal-from-unix <timestamp> \
   --signal-to-unix <timestamp> \
   --out outputs/stage10a/backfill-report.json
@@ -1028,16 +1091,18 @@ WALLET_STAGE10_PAPER_TRADING_ENGINE = PASS
 WALLET_STAGE10_EMPIRICAL_REPLAY_PIPELINE = PASS
 WALLET_STAGE10A0_AUTOMATIC_WALLET_UNIVERSE_DISCOVERY = PASS
 WALLET_STAGE10A0_REAL_MAINNET_SMOKE = PASS
+WALLET_STAGE10A1A_CANDIDATE_REFINEMENT = PASS
 WALLET_STAGE10A1_SUPABASE_ADAPTER = PASS
-WALLET_STAGE10A1_CAUSAL_HISTORICAL_BACKFILL = PASS
-WALLET_STAGE10A1_REAL_POPULATION = NEXT
+WALLET_STAGE10A1_CAUSAL_HISTORICAL_BACKFILL_ENGINE = PASS
+WALLET_STAGE10A1B_REAL_CAUSAL_HISTORICAL_BACKFILL = NEXT
+WALLET_STAGE10A1C_REAL_STAGE3_TO_STAGE5_QUALIFICATION = PENDING
 WALLET_STAGE10B_REAL_OHLC = PENDING
 WALLET_STAGE10C_EMPIRICAL_REPLAY = PENDING_REAL_DATA
 WALLET_STAGE10_EMPIRICAL_REPLAY_DATASET = PENDING_REAL_DATA
 WALLET_STAGE10_REAL_A_B_C_E_COMPARISON = PENDING
 WALLET_STAGE10_HISTORICAL_RULE_D = PENDING_CAUSAL_STAGE6
 
-NEXT = STAGE10A1_REAL_CAUSAL_POPULATION
+NEXT = STAGE10A1B_REAL_CAUSAL_HISTORICAL_BACKFILL
 
 FUTURE AFTER REAL STAGE10 RESULTS:
 WALLET_STAGE11_VALIDATION_OPTIMIZATION_AND_S4_S5
