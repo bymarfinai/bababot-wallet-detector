@@ -1,6 +1,6 @@
 WALLET_STAGE10A_SUPABASE_ADAPTER_PASS
 WALLET_STAGE10A_CAUSAL_HISTORICAL_BACKFILL_PASS
-python_tests_cumulative=196/196
+python_tests_cumulative=239/239
 supabase_project=bababot-wallet-detector
 supabase_region=ap-southeast-1
 raw_history_persistence=PASS
@@ -16,6 +16,12 @@ historical_rule_B_ready=true
 historical_rule_C_ready=true
 historical_rule_D_ready=false
 historical_rule_E_ready=true
-real_population=PENDING_HELIUS_KEY_AND_WALLET_UNIVERSE
+real_population=PARTIAL_STANDARD_LANE
+population_run=36511958904
+standard_wallets_backfilled=10
+high_volume_wallets_pending=55
+standard_raw_rows=187
+standard_normalized_rows=187
+supabase_persistence=PENDING_SERVER_SECRET
 edge_claim=NONE
-next=WALLET_STAGE10B_REAL_OHLC_INGESTION_AFTER_OR_ALONGSIDE_REAL_10A_POPULATION
+next=WALLET_STAGE10A1B_HIGH_VOLUME_AND_PERSISTENCE
