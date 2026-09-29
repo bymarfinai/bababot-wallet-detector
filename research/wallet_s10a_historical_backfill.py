@@ -30,6 +30,9 @@ from research.wallet_supabase_adapter import SupabaseRestClient
 from research.wallet_s10a0_wallet_universe_discovery import (
     wallet_addresses_from_universe,
 )
+from research.wallet_s10a1_candidate_refinement import (
+    wallet_addresses_from_refinement,
+)
 
 STAGE10A_VERSION = "wallet-s10a-v1"
 STAGE8_VERSION = "wallet-s8-v1"
@@ -681,8 +684,29 @@ def _load_wallets(
     explicit: Iterable[str],
     wallets_file: str | None,
     universe_file: str | None = None,
+    refinement_file: str | None = None,
 ) -> list[str]:
     values = list(explicit)
+
+    if refinement_file:
+        parsed = json.loads(
+            Path(refinement_file).read_text(encoding="utf-8")
+        )
+        refinement = (
+            parsed.get("refinement")
+            if isinstance(parsed, dict) and "refinement" in parsed
+            else parsed
+        )
+        if not isinstance(refinement, dict):
+            raise ValueError(
+                "refinement file must contain a Stage-10A-1A object"
+            )
+        values.extend(
+            wallet_addresses_from_refinement(
+                refinement,
+                trader_only=True,
+            )
+        )
 
     if universe_file:
         parsed = json.loads(
@@ -754,6 +778,14 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--refinement-file",
+        default=None,
+        help=(
+            "Stage-10A-1A refinement artifact. Preferred production input; "
+            "only TRADER_CANDIDATE wallets are backfilled."
+        ),
+    )
+    parser.add_argument(
         "--signal-from-unix",
         type=int,
         required=True,
@@ -791,6 +823,7 @@ def main() -> int:
         args.wallet,
         args.wallets_file,
         args.universe_file,
+        args.refinement_file,
     )
     api_key = os.environ.get("HELIUS_API_KEY")
     if not api_key:
