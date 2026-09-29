@@ -375,12 +375,16 @@ class Stage10A1BRealBackfillTests(unittest.TestCase):
                 calls[key] = calls.get(key, 0) + 1
 
                 if wallet == WALLET_A:
-                    result = [{
-                        "signature": "a-1",
-                        "slot": 900,
-                        "blockTime": 900,
-                        "err": None,
-                    }]
+                    result = (
+                        [{
+                            "signature": "a-1",
+                            "slot": 900,
+                            "blockTime": 900,
+                            "err": None,
+                        }]
+                        if before is None
+                        else []
+                    )
                 else:
                     # With page_limit=1 and max_pages=2, WALLET_B
                     # deliberately keeps returning a next cursor.
