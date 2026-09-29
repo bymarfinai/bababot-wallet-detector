@@ -248,6 +248,12 @@ class Stage10A1BRealBackfillTests(unittest.TestCase):
                     ]
                 else:
                     result = []
+            elif rpc_method == "getTransaction":
+                signature = payload["params"][0]
+                result = raw_tx(
+                    signature,
+                    900 if signature == "old" else 1000,
+                )
             else:
                 raise AssertionError(rpc_method)
             return 200, json.dumps({
@@ -414,13 +420,17 @@ class Stage10A1BRealBackfillTests(unittest.TestCase):
                 ]).encode("utf-8")
             if payload["method"] == "getFirstAvailableBlock":
                 result = 0
-            else:
+            elif payload["method"] == "getSignaturesForAddress":
                 result = [{
                     "signature": "sig",
                     "slot": 900,
                     "blockTime": 900,
                     "err": None,
                 }]
+            elif payload["method"] == "getTransaction":
+                result = None
+            else:
+                raise AssertionError(payload["method"])
             return 200, json.dumps({
                 "jsonrpc": "2.0",
                 "id": payload["id"],
