@@ -342,6 +342,7 @@ def build_causal_historical_replay(
     *,
     signal_from_unix: int | None = None,
     signal_to_unix: int | None = None,
+    universe_effective_after_unix: int | None = None,
 ) -> dict[str, Any]:
     """Rebuild historical qualification using only information available then.
 
@@ -368,12 +369,19 @@ def build_causal_historical_replay(
         for wallet in wallets
     }
 
+    if universe_effective_after_unix is not None:
+        universe_effective_after_unix = int(
+            universe_effective_after_unix
+        )
+
     universe_core = {
         "version": STAGE10A_VERSION,
         "wallets": wallets,
+        "universe_effective_after_unix": universe_effective_after_unix,
         "population_policy": (
-            "wallet identities supplied externally; historical qualification "
-            "is reconstructed causally"
+            "wallet identities are eligible for smart-money use only after "
+            "their discovery universe is observable; historical "
+            "qualification is reconstructed causally"
         ),
     }
     universe_fingerprint = _fingerprint(universe_core)
@@ -412,6 +420,14 @@ def build_causal_historical_replay(
         signal_from_unix = int(signal_from_unix)
     if signal_to_unix is not None:
         signal_to_unix = int(signal_to_unix)
+    if universe_effective_after_unix is not None:
+        if signal_from_unix is None:
+            signal_from_unix = universe_effective_after_unix + 1
+        elif signal_from_unix <= universe_effective_after_unix:
+            raise ValueError(
+                "signal_from_unix must be strictly after "
+                "universe_effective_after_unix"
+            )
     if (
         signal_from_unix is not None
         and signal_to_unix is not None
@@ -424,6 +440,15 @@ def build_causal_historical_replay(
         if signal_from_unix is not None
         else None
     )
+    if universe_effective_after_unix is not None:
+        persistence_floor = (
+            universe_effective_after_unix
+            if persistence_floor is None
+            else max(
+                persistence_floor,
+                universe_effective_after_unix,
+            )
+        )
 
     for block_time in sorted(grouped):
         rows = sorted(
@@ -440,8 +465,13 @@ def build_causal_historical_replay(
         for row in rows:
             wallet = str(row["wallet"])
             record = current_records[wallet]
+            universe_is_live = (
+                universe_effective_after_unix is None
+                or block_time > universe_effective_after_unix
+            )
             if (
-                bool(record.get("live_monitor_eligible"))
+                universe_is_live
+                and bool(record.get("live_monitor_eligible"))
                 and record.get("registry_status") == "ACTIVE"
             ):
                 live_event = _decorate_stage8_event(
@@ -557,6 +587,12 @@ def build_causal_historical_replay(
             "qualification_effective_policy": (
                 "STATUS_CHANGES_EFFECTIVE_STRICTLY_AFTER_TRIGGER_TIMESTAMP"
             ),
+            "universe_activation_policy": (
+                "SMART_MONEY_EVENTS_STRICTLY_AFTER_DISCOVERY_UNIVERSE"
+            ),
+            "universe_effective_after_unix": (
+                universe_effective_after_unix
+            ),
             "stage6_historical_policy": (
                 "DISABLED_UNTIL_AS_OF_SAFE_SPECIALTY_RECONSTRUCTION"
             ),
@@ -636,8 +672,12 @@ def persist_stage10a_backfill(
     raw_by_wallet: dict[str, Iterable[dict[str, Any]]],
     normalized_by_wallet: dict[str, Iterable[dict[str, Any]]],
     replay: dict[str, Any],
+    raw_source: str = "helius_gtfa",
 ) -> dict[str, Any]:
-    raw_rows = client.persist_historical_raw(raw_by_wallet)
+    raw_rows = client.persist_historical_raw(
+        raw_by_wallet,
+        source=raw_source,
+    )
     normalized_rows = client.persist_normalized_history(
         normalized_by_wallet
     )
