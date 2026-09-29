@@ -1,0 +1,150 @@
+name: Wallet History Mainnet Smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "research/wallet_s10a1b_real_historical_backfill.py"
+      - "research/wallet_s10a_historical_backfill.py"
+      - "tests/test_wallet_s10a1b_real_historical_backfill.py"
+      - ".github/workflows/wallet-history-mainnet-smoke.yml"
+
+jobs:
+  wallet-history-mainnet-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build live discovery + refinement sample
+        run: |
+          python -m research.wallet_s10a0_wallet_universe_discovery \
+            --lookback-slots 2 \
+            --require-candidates \
+            --out /tmp/stage10a0.json
+
+          python -m research.wallet_s10a1_candidate_refinement \
+            --universe-file /tmp/stage10a0.json \
+            --require-trader-candidates \
+            --out /tmp/stage10a1a.json
+      - name: Probe real historical wallet backfill
+        run: |
+          python - <<'PY'
+          import json
+          import time
+          from pathlib import Path
+
+          from research.wallet_s10a1_candidate_refinement import (
+              wallet_addresses_from_refinement,
+          )
+          from research.wallet_s10a1b_real_historical_backfill import (
+              SolanaWalletHistoryRpc,
+              build_refinement_subset,
+              build_stage10a1b_report,
+              collect_solana_rpc_histories,
+          )
+
+          refinement = json.loads(
+              Path("/tmp/stage10a1a.json").read_text()
+          )["refinement"]
+          wallets = wallet_addresses_from_refinement(
+              refinement,
+              trader_only=True,
+          )
+          source = SolanaWalletHistoryRpc(
+              "https://api.mainnet-beta.solana.com",
+              source_label="solana-public-mainnet",
+          )
+          first_available = source.first_available_block()
+
+          selected = None
+          recent_count = None
+          for wallet in wallets[:30]:
+              rows = source.signatures_page(
+                  wallet,
+                  limit=20,
+                  before=None,
+              )
+              if rows and len(rows) < 20:
+                  selected = wallet
+                  recent_count = len(rows)
+                  break
+
+          if selected is None:
+              selected = wallets[0]
+              rows = source.signatures_page(
+                  selected,
+                  limit=5,
+                  before=None,
+              )
+              signatures = [
+                  str(row["signature"])
+                  for row in rows[:3]
+                  if row.get("signature")
+              ]
+              txs = source.transactions(
+                  signatures,
+                  batch_size=3,
+              )
+              summary = {
+                  "mode": "BOUNDED_PROVIDER_PROBE",
+                  "provider_first_available_slot": first_available,
+                  "provider_archive_from_genesis": first_available == 0,
+                  "recent_signature_count_sample": len(rows),
+                  "transactions_fetched": len(txs),
+                  "qualification_grade": False,
+                  "reason": (
+                      "no <=19-signature trader found in first 30 "
+                      "candidates; full cohort backfill not attempted"
+                  ),
+              }
+          else:
+              subset = build_refinement_subset(
+                  refinement,
+                  [selected],
+              )
+              now = int(time.time())
+              raw, fetch = collect_solana_rpc_histories(
+                  source,
+                  [selected],
+                  as_of_unix=now,
+                  signature_page_limit=20,
+                  max_signature_pages_per_wallet=2,
+                  transaction_batch_size=10,
+                  require_archive_from_genesis=False,
+              )
+              report, _normalized, replay = build_stage10a1b_report(
+                  subset,
+                  raw_by_wallet=raw,
+                  fetch_report=fetch,
+                  history_as_of_unix=now,
+              )
+              summary = {
+                  "mode": "FULL_SINGLE_WALLET_BACKFILL",
+                  "provider_first_available_slot": first_available,
+                  "provider_archive_from_genesis": first_available == 0,
+                  "recent_signature_count_sample": recent_count,
+                  "qualification_grade": fetch["qualification_grade"],
+                  "raw_transaction_rows": fetch[
+                      "raw_transaction_rows_across_wallets"
+                  ],
+                  "normalized_event_count": report[
+                      "normalization"
+                  ]["normalized_event_count"],
+                  "registry_snapshot_count": replay[
+                      "summary"
+                  ]["causal_registry_snapshot_count"],
+                  "report_fingerprint": report["report_fingerprint"],
+              }
+
+          Path("/tmp/stage10a1b-smoke-summary.json").write_text(
+              json.dumps(summary, indent=2) + "\n"
+          )
+          print(json.dumps(summary, indent=2))
+
+          assert summary.get("transactions_fetched", 1) >= 1
+          PY
