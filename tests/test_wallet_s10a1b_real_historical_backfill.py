@@ -10,6 +10,7 @@ from research.wallet_s10a1_candidate_refinement import (
 )
 from research.wallet_s10a1b_real_historical_backfill import (
     SolanaWalletHistoryRpc,
+    build_refinement_shard,
     build_refinement_subset,
     build_stage10a1b_report,
     collect_solana_rpc_histories,
@@ -21,11 +22,16 @@ from research.wallet_s10a_historical_backfill import (
 from research.wallet_supabase_adapter import raw_wallet_transaction_row
 
 WALLET_A = "86xCnPeV69n6t3DnyGvkKobf9FdN2H9oiVDdaMpo2MMY"
+WALLET_B = "77777777777777777777777777777777777777777777"
 TOKEN_A = "A1111111111111111111111111111111111111111111"
 SOL = "SOL_NATIVE"
 
 
-def discovery_swap(signature, block_time=1000):
+def discovery_swap(
+    signature,
+    block_time=1000,
+    wallet=WALLET_A,
+):
     return {
         "slot": block_time,
         "blockTime": block_time,
@@ -33,7 +39,7 @@ def discovery_swap(signature, block_time=1000):
             "signatures": [signature],
             "message": {
                 "accountKeys": [
-                    {"pubkey": WALLET_A, "signer": True, "writable": True},
+                    {"pubkey": wallet, "signer": True, "writable": True},
                     {"pubkey": TOKEN_A, "signer": False, "writable": True},
                 ],
             },
@@ -45,7 +51,7 @@ def discovery_swap(signature, block_time=1000):
                 {
                     "accountIndex": 1,
                     "mint": USDC_MINT,
-                    "owner": WALLET_A,
+                    "owner": wallet,
                     "uiTokenAmount": {
                         "amount": "1000000",
                         "decimals": 6,
@@ -54,7 +60,7 @@ def discovery_swap(signature, block_time=1000):
                 {
                     "accountIndex": 2,
                     "mint": TOKEN_A,
-                    "owner": WALLET_A,
+                    "owner": wallet,
                     "uiTokenAmount": {
                         "amount": "0",
                         "decimals": 6,
@@ -65,7 +71,7 @@ def discovery_swap(signature, block_time=1000):
                 {
                     "accountIndex": 1,
                     "mint": USDC_MINT,
-                    "owner": WALLET_A,
+                    "owner": wallet,
                     "uiTokenAmount": {
                         "amount": "500000",
                         "decimals": 6,
@@ -74,7 +80,7 @@ def discovery_swap(signature, block_time=1000):
                 {
                     "accountIndex": 2,
                     "mint": TOKEN_A,
-                    "owner": WALLET_A,
+                    "owner": wallet,
                     "uiTokenAmount": {
                         "amount": "100000",
                         "decimals": 6,
@@ -92,6 +98,31 @@ def refinement_fixture():
         "block": {
             "blockTime": 1000,
             "transactions": [tx],
+        },
+    }
+    universe = build_candidate_universe(
+        [block],
+        source_label="rpc",
+        source_origin="https://rpc.example/",
+        requested_start_slot=1000,
+        requested_end_slot=1000,
+    )
+    return build_candidate_refinement(
+        universe,
+        [block],
+        source_label="rpc",
+        source_origin="https://rpc.example/",
+    )
+
+
+def two_wallet_refinement_fixture():
+    tx_a = discovery_swap("discover-a", 1000, WALLET_A)
+    tx_b = discovery_swap("discover-b", 1000, WALLET_B)
+    block = {
+        "slot": 1000,
+        "block": {
+            "blockTime": 1000,
+            "transactions": [tx_a, tx_b],
         },
     }
     universe = build_candidate_universe(
@@ -466,6 +497,40 @@ class Stage10A1BRealBackfillTests(unittest.TestCase):
         self.assertEqual(replay["signal_from_unix"], 1001)
         self.assertEqual(report["source_kind"], "REAL")
         self.assertIn(WALLET_A, normalized)
+
+    def test_refinement_shards_partition_all_trader_wallets(self):
+        refinement = two_wallet_refinement_fixture()
+        shard0 = build_refinement_shard(
+            refinement,
+            shard_index=0,
+            shard_count=2,
+        )
+        shard1 = build_refinement_shard(
+            refinement,
+            shard_index=1,
+            shard_count=2,
+        )
+        wallets0 = {
+            row["wallet"] for row in shard0["records"]
+        }
+        wallets1 = {
+            row["wallet"] for row in shard1["records"]
+        }
+        self.assertEqual(len(wallets0), 1)
+        self.assertEqual(len(wallets1), 1)
+        self.assertEqual(
+            wallets0 | wallets1,
+            {WALLET_A, WALLET_B},
+        )
+        self.assertFalse(wallets0 & wallets1)
+
+    def test_refinement_shard_rejects_invalid_index(self):
+        with self.assertRaises(ValueError):
+            build_refinement_shard(
+                refinement_fixture(),
+                shard_index=1,
+                shard_count=1,
+            )
 
     def test_refinement_subset_is_explicit_and_deterministic(self):
         refinement = refinement_fixture()
