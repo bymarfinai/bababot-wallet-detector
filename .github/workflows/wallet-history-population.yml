@@ -147,8 +147,8 @@ jobs:
               trader_only=True,
           )
           source = SolanaWalletHistoryRpc(
-              "https://api.mainnet-beta.solana.com",
-              source_label="solana-public-mainnet",
+              "https://api.mainnet.solana.com",
+              source_label="solana-official-mainnet",
           )
           plan = plan_solana_rpc_history_capacity(
               source,
@@ -223,7 +223,8 @@ jobs:
             --history-as-of-unix "$HISTORY_AS_OF_UNIX" \
             --signature-page-limit 100 \
             --max-signature-pages-per-wallet 1 \
-            --transaction-batch-size 10 \
+            --transaction-batch-size 1 \
+            --rpc-min-request-interval-ms 500 \
             --evidence-only \
             --evidence-dir "$SHARD_DIR/evidence" \
             $PERSIST_ARGS \
@@ -311,8 +312,8 @@ jobs:
           )
 
           source = SolanaWalletHistoryRpc(
-              "https://api.mainnet-beta.solana.com",
-              source_label="solana-public-mainnet",
+              "https://api.mainnet.solana.com",
+              source_label="solana-official-mainnet",
           )
           deep = plan_solana_rpc_history_capacity(
               source,
@@ -393,7 +394,8 @@ jobs:
             --history-as-of-unix "$HISTORY_AS_OF_UNIX" \
             --signature-page-limit 100 \
             --max-signature-pages-per-wallet 5 \
-            --transaction-batch-size 10 \
+            --transaction-batch-size 1 \
+            --rpc-min-request-interval-ms 500 \
             --evidence-only \
             --evidence-dir "$OUT/public-rpc-evidence" \
             $PERSIST_ARGS \
