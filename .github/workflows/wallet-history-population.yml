@@ -154,7 +154,7 @@ jobs:
               source,
               wallets,
               as_of_unix=int(os.environ["HISTORY_AS_OF_UNIX"]),
-              signature_page_limit=1000,
+              signature_page_limit=100,
               probe_max_pages_per_wallet=1,
           )
 
@@ -221,7 +221,7 @@ jobs:
             --refinement-file "$SHARD_DIR/standard-refinement.json" \
             --provider solana-rpc \
             --history-as-of-unix "$HISTORY_AS_OF_UNIX" \
-            --signature-page-limit 1000 \
+            --signature-page-limit 100 \
             --max-signature-pages-per-wallet 1 \
             --transaction-batch-size 10 \
             --evidence-only \
