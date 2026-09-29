@@ -1,14 +1,14 @@
 # BabaBot Wallet Detector — Stage 10A Supabase Causal Historical Backfill
 
 **Date:** 2026-09-28  
-**Status:** IMPLEMENTED / ACTIVATION-READY
+**Status:** ENGINE PASS / REAL POPULATION PARTIAL
 
 ## Result
 
 ```text
 WALLET_STAGE10A_SUPABASE_ADAPTER = PASS
 WALLET_STAGE10A_CAUSAL_BACKFILL_ENGINE = PASS
-WALLET_STAGE10A_REAL_POPULATION = PENDING_RUNTIME_INPUTS
+WALLET_STAGE10A_REAL_POPULATION = PARTIAL_STANDARD_LANE
 ```
 
 ## Supabase
@@ -151,7 +151,7 @@ Stage-10A coverage includes:
 Latest full Python regression:
 
 ```text
-196 / 196 PASS
+239 / 239 PASS
 ```
 
 ## Activation boundary
@@ -179,3 +179,8 @@ Stage 10B   — real OHLC ingestion
 Stage 10C   — empirical A/B/C/E replay
 Rule D      — only after causal Stage-6 reconstruction
 ```
+
+
+## 2026-09-29 Stage 10A-1B population update
+
+Real population run `36511958904` processed a fresh automatic cohort of 65 trader candidates. Ten STANDARD-capacity wallets completed qualification-grade raw + Stage-2 normalized historical evidence backfill (187 raw rows and 187 normalized rows). Fifty-five HIGH_VOLUME wallets remain queued for a higher-capacity/indexed history provider. GitHub has no Helius or Supabase server-write secret configured, so artifacts were preserved but production Supabase persistence remains pending.
