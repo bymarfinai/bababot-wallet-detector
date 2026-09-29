@@ -154,7 +154,7 @@ class SolanaWalletHistoryRpc:
         )
 
     def rpc(self, method: str, params: list[Any]) -> Any:
-        last_error: dict[str, Any] | None = None
+        last_error: Any = None
         for attempt in range(self.attempts):
             self._request_id += 1
             payload = {
@@ -163,7 +163,21 @@ class SolanaWalletHistoryRpc:
                 "method": method,
                 "params": params,
             }
-            response = self._post(payload)
+            try:
+                # Keep transport attempts at one here. This method owns the
+                # retry/backoff policy, avoiding nested exponential retries
+                # when public RPC returns HTTP or JSON-RPC 429.
+                response = self._post(payload, attempts=1)
+            except RuntimeError as exc:
+                last_error = str(exc)
+                if attempt < self.attempts - 1:
+                    time.sleep(min(2 ** attempt, 8))
+                    continue
+                raise RuntimeError(
+                    f"RPC {method} failed after "
+                    f"{self.attempts} attempts: {last_error}"
+                ) from exc
+
             if not isinstance(response, dict):
                 raise TypeError(
                     f"RPC {method} response must be an object"
