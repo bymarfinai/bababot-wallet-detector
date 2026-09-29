@@ -7,6 +7,8 @@ on:
     paths:
       - "research/wallet_s10a0_wallet_universe_discovery.py"
       - "tests/test_wallet_s10a0_wallet_universe_discovery.py"
+      - "research/wallet_s10a1_candidate_refinement.py"
+      - "tests/test_wallet_s10a1_candidate_refinement.py"
       - ".github/workflows/discovery-mainnet-smoke.yml"
 
 jobs:
@@ -25,24 +27,55 @@ jobs:
             --lookback-slots 2 \
             --require-candidates \
             --out /tmp/stage10a0-mainnet-smoke.json
+          python -m research.wallet_s10a1_candidate_refinement \
+            --universe-file /tmp/stage10a0-mainnet-smoke.json \
+            --require-trader-candidates \
+            --out /tmp/stage10a1a-mainnet-smoke.json
+
           python - <<'PY'
           import json
           from pathlib import Path
 
-          payload = json.loads(
+          discovery = json.loads(
               Path("/tmp/stage10a0-mainnet-smoke.json").read_text()
+          )["universe"]
+          refinement = json.loads(
+              Path("/tmp/stage10a1a-mainnet-smoke.json").read_text()
+          )["refinement"]
+
+          assert discovery["source"]["kind"] == "SOLANA_JSON_RPC"
+          assert discovery["scan"]["scanned_block_count"] >= 1
+          assert discovery["scan"]["transaction_count"] >= 1
+          assert discovery["candidate_wallet_count"] >= 1
+          assert refinement["trader_candidate_wallet_count"] >= 1
+          assert (
+              refinement["trader_candidate_wallet_count"]
+              <= discovery["candidate_wallet_count"]
           )
-          universe = payload["universe"]
-          assert universe["source"]["kind"] == "SOLANA_JSON_RPC"
-          assert universe["scan"]["scanned_block_count"] >= 1
-          assert universe["scan"]["transaction_count"] >= 1
-          assert universe["candidate_wallet_count"] >= 1
+          assert (
+              refinement["meme_buy_candidate_wallet_count"]
+              <= refinement["trader_candidate_wallet_count"]
+          )
 
           print(json.dumps({
-              "universe_fingerprint": universe["universe_fingerprint"],
-              "scanned_block_count": universe["scan"]["scanned_block_count"],
-              "transaction_count": universe["scan"]["transaction_count"],
-              "candidate_wallet_count": universe["candidate_wallet_count"],
-              "source_origin": universe["source"]["origin"],
+              "universe_fingerprint": discovery["universe_fingerprint"],
+              "refinement_fingerprint": refinement["refinement_fingerprint"],
+              "scanned_block_count": discovery["scan"]["scanned_block_count"],
+              "transaction_count": discovery["scan"]["transaction_count"],
+              "activity_candidate_wallet_count": (
+                  discovery["candidate_wallet_count"]
+              ),
+              "trader_candidate_wallet_count": (
+                  refinement["trader_candidate_wallet_count"]
+              ),
+              "non_trader_activity_wallet_count": (
+                  refinement["non_trader_activity_wallet_count"]
+              ),
+              "meme_buy_candidate_wallet_count": (
+                  refinement["meme_buy_candidate_wallet_count"]
+              ),
+              "buy_event_count": refinement["buy_event_count"],
+              "sell_event_count": refinement["sell_event_count"],
+              "source_origin": discovery["source"]["origin"],
           }, indent=2))
           PY
