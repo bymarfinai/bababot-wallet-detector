@@ -74,8 +74,8 @@ No consumer is required for Wallet Detector itself to work.
 | 9 | PASS | Smart-money signal output layer |
 | 10A-0 | PASS | Automatic wallet universe discovery from real Solana activity; real mainnet smoke PASS |
 | 10A-1A | PASS | Stage-2 trader/meme candidate refinement before full backfill |
-| 10A-1B | NEXT | Real causal historical backfill for trader candidates |
-| 10A-1C | PENDING | Stage 3–5 qualification on real populated histories |
+| 10A-1B | PARTIAL PASS | Real causal backfill: STANDARD lane PASS; HIGH_VOLUME + Supabase persistence pending |
+| 10A-1C | BLOCKED | Stage 3–5 qualification waits for qualification-grade 10A-1B population |
 | 10B | PENDING | Real token OHLC ingestion |
 | 10C | PENDING | Real empirical A/B/C/D/E replay |
 | 11 | PLANNED | Validation + rule optimization + S4/S5 calibration |
@@ -546,7 +546,7 @@ deterministic replay fingerprints
 Full Python regression:
 
 ```text
-220 / 220 PASS
+239 / 239 PASS
 ```
 
 ### Stage 10A-0 — Automatic wallet universe discovery
@@ -652,7 +652,58 @@ docs/WALLET_STAGE10A1A_CANDIDATE_REFINEMENT_Result.md
 docs/WALLET_STAGE10A1A_CANDIDATE_REFINEMENT_Status.txt
 ```
 
-### Stage 10A-1B — Supabase causal historical backfill
+### Stage 10A-1B — Real causal historical backfill
+
+**PARTIAL PASS — STANDARD lane validated on real mainnet data.**
+
+Dedicated implementation:
+
+```text
+research/wallet_s10a1b_real_historical_backfill.py
+```
+
+Real population workflow:
+
+```text
+.github/workflows/wallet-history-population.yml
+```
+
+Latest successful population run:
+
+```text
+run                         = 36511958904
+activity candidates         = 92
+trader candidates           = 65
+meme-buy candidates         = 36
+STANDARD wallets            = 10
+HIGH_VOLUME wallets         = 55
+STANDARD raw tx rows        = 187
+STANDARD normalized rows    = 187
+lane partition complete     = true
+```
+
+Native Solana RPC also passed a real qualification-grade full-single-wallet backfill with `getFirstAvailableBlock = 0`, proving archive-from-genesis access in the tested provider path.
+
+Important: `HIGH_VOLUME` is only an execution-capacity lane. It does **not** mean the wallet is bad or unqualified.
+
+The current GitHub runtime has neither `HELIUS_API_KEY` nor `WALLET_SUPABASE_SECRET_KEY`, so:
+
+```text
+STANDARD evidence artifacts = PASS
+HIGH_VOLUME completion       = PENDING higher-capacity/indexed history provider
+Supabase production writes  = PENDING server-side write secret
+```
+
+Live Supabase historical evidence tables therefore remain unpopulated at this checkpoint. The workflow intentionally preserves auditable raw/normalized artifacts instead of claiming persistence that did not happen.
+
+See:
+
+```text
+docs/WALLET_STAGE10A1B_REAL_CAUSAL_HISTORICAL_BACKFILL_Result.md
+docs/WALLET_STAGE10A1B_REAL_CAUSAL_HISTORICAL_BACKFILL_Status.txt
+```
+
+### Stage 10A causal qualification engine
 
 Implemented:
 
@@ -849,6 +900,8 @@ The dashboard build is implemented and the latest repository commit reports a su
 .github/
 └── workflows/
     ├── discovery-mainnet-smoke.yml
+    ├── wallet-history-mainnet-smoke.yml
+    ├── wallet-history-population.yml
     └── tests.yml
 
 app/
@@ -907,6 +960,8 @@ docs/
 ├── WALLET_STAGE10A0_AUTOMATIC_WALLET_UNIVERSE_DISCOVERY_Status.txt
 ├── WALLET_STAGE10A1A_CANDIDATE_REFINEMENT_Result.md
 ├── WALLET_STAGE10A1A_CANDIDATE_REFINEMENT_Status.txt
+├── WALLET_STAGE10A1B_REAL_CAUSAL_HISTORICAL_BACKFILL_Result.md
+├── WALLET_STAGE10A1B_REAL_CAUSAL_HISTORICAL_BACKFILL_Status.txt
 ├── WALLET_STAGE10A_SUPABASE_CAUSAL_BACKFILL_Result.md
 └── WALLET_STAGE10A_SUPABASE_CAUSAL_BACKFILL_Status.txt
 
@@ -927,6 +982,7 @@ research/
 ├── wallet_s10_replay_activation.py
 ├── wallet_s10a0_wallet_universe_discovery.py
 ├── wallet_s10a1_candidate_refinement.py
+├── wallet_s10a1b_real_historical_backfill.py
 ├── wallet_s10a_historical_backfill.py
 └── wallet_supabase_adapter.py
 
@@ -946,6 +1002,7 @@ tests/
 ├── test_wallet_s10_replay_activation.py
 ├── test_wallet_s10a0_wallet_universe_discovery.py
 ├── test_wallet_s10a1_candidate_refinement.py
+├── test_wallet_s10a1b_real_historical_backfill.py
 └── test_wallet_s10a_historical_backfill.py
 
 supabase/
@@ -1094,15 +1151,18 @@ WALLET_STAGE10A0_REAL_MAINNET_SMOKE = PASS
 WALLET_STAGE10A1A_CANDIDATE_REFINEMENT = PASS
 WALLET_STAGE10A1_SUPABASE_ADAPTER = PASS
 WALLET_STAGE10A1_CAUSAL_HISTORICAL_BACKFILL_ENGINE = PASS
-WALLET_STAGE10A1B_REAL_CAUSAL_HISTORICAL_BACKFILL = NEXT
-WALLET_STAGE10A1C_REAL_STAGE3_TO_STAGE5_QUALIFICATION = PENDING
+WALLET_STAGE10A1B_REAL_CAUSAL_HISTORICAL_BACKFILL = PARTIAL_PASS_STANDARD_LANE
+WALLET_STAGE10A1B_STANDARD_WALLETS = 10
+WALLET_STAGE10A1B_HIGH_VOLUME_WALLETS = 55
+WALLET_STAGE10A1B_SUPABASE_PERSISTENCE = PENDING_SERVER_SECRET
+WALLET_STAGE10A1C_REAL_STAGE3_TO_STAGE5_QUALIFICATION = BLOCKED_UNTIL_10A1B_COMPLETE
 WALLET_STAGE10B_REAL_OHLC = PENDING
 WALLET_STAGE10C_EMPIRICAL_REPLAY = PENDING_REAL_DATA
 WALLET_STAGE10_EMPIRICAL_REPLAY_DATASET = PENDING_REAL_DATA
 WALLET_STAGE10_REAL_A_B_C_E_COMPARISON = PENDING
 WALLET_STAGE10_HISTORICAL_RULE_D = PENDING_CAUSAL_STAGE6
 
-NEXT = STAGE10A1B_REAL_CAUSAL_HISTORICAL_BACKFILL
+NEXT = STAGE10A1B_HIGH_VOLUME_AND_PERSISTENCE
 
 FUTURE AFTER REAL STAGE10 RESULTS:
 WALLET_STAGE11_VALIDATION_OPTIMIZATION_AND_S4_S5
