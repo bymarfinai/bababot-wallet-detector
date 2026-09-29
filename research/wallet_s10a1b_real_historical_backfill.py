@@ -109,12 +109,20 @@ class SolanaWalletHistoryRpc:
     def public_origin(self) -> str:
         return _safe_rpc_origin(self.rpc_url)
 
-    def _post(self, payload: Any) -> Any:
+    def _post(
+        self,
+        payload: Any,
+        *,
+        attempts: int | None = None,
+    ) -> Any:
         body = json.dumps(payload).encode("utf-8")
         headers = {"Content-Type": "application/json"}
         last_error: Exception | None = None
+        attempt_count = self.attempts if attempts is None else int(attempts)
+        if attempt_count < 1:
+            raise ValueError("attempts must be >= 1")
 
-        for attempt in range(self.attempts):
+        for attempt in range(attempt_count):
             try:
                 status, raw = self.transport(
                     "POST",
@@ -136,12 +144,12 @@ class SolanaWalletHistoryRpc:
                 json.JSONDecodeError,
             ) as exc:
                 last_error = exc
-                if attempt == self.attempts - 1:
+                if attempt == attempt_count - 1:
                     break
                 time.sleep(min(2 ** attempt, 8))
 
         raise RuntimeError(
-            f"RPC request failed after {self.attempts} attempts: "
+            f"RPC request failed after {attempt_count} attempts: "
             f"{last_error}"
         )
 
@@ -198,7 +206,12 @@ class SolanaWalletHistoryRpc:
                 "params": params,
             })
 
-        response = self._post(payload)
+        # Batch requests are an optimization only. Public Solana RPC
+        # endpoints may reject bursts with HTTP 429 even while scalar calls
+        # remain available. Fail the batch attempt immediately so the caller
+        # can fall back to the scalar retry/backoff path without paying the
+        # full batch retry delay first.
+        response = self._post(payload, attempts=1)
         if not isinstance(response, list):
             raise TypeError("RPC batch response must be an array")
 
