@@ -9,7 +9,6 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable, Iterable
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 from research.wallet_s1_data_foundation import (
@@ -40,11 +39,6 @@ STAGE8_VERSION = "wallet-s8-v1"
 HELIUS_ENDPOINT = "https://mainnet.helius-rpc.com/"
 DEFAULT_PAGE_LIMIT = 100
 DEFAULT_MAX_PAGES_PER_WALLET = 1000
-DEFAULT_RPC_PAGE_LIMIT = 1000
-DEFAULT_RPC_MAX_SIGNATURES = 1000
-DEFAULT_RPC_ATTEMPTS = 5
-DEFAULT_MAX_SUPPORTED_TRANSACTION_VERSION = 1
-DEFAULT_SOLANA_RPC_URL = "https://api.mainnet-beta.solana.com"
 ROLLING_SIGNAL_SECONDS = 60 * 60
 
 FetchPage = Callable[
@@ -118,227 +112,6 @@ def _fetch_helius_page(
     raise RuntimeError(
         f"Helius request failed after {attempts} attempts: {last_error}"
     )
-
-
-def _safe_rpc_origin(url: str) -> str:
-    parts = urlsplit(str(url))
-    if parts.scheme not in {"http", "https"} or not parts.netloc:
-        raise ValueError("RPC URL must be an absolute HTTP(S) URL")
-    return urlunsplit((parts.scheme, parts.netloc, parts.path or "/", "", ""))
-
-
-def _rpc_request(
-    rpc_url: str,
-    method: str,
-    params: list[Any],
-    *,
-    attempts: int = DEFAULT_RPC_ATTEMPTS,
-) -> Any:
-    if int(attempts) < 1:
-        raise ValueError("attempts must be >= 1")
-    _safe_rpc_origin(rpc_url)
-    body = json.dumps({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": method,
-        "params": params,
-    }).encode("utf-8")
-
-    last_error: Exception | None = None
-    for attempt in range(int(attempts)):
-        request = Request(
-            rpc_url,
-            data=body,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        try:
-            with urlopen(request, timeout=45) as response:
-                parsed = json.loads(response.read().decode("utf-8"))
-            if parsed.get("error") is not None:
-                raise RuntimeError(
-                    f"RPC {method} error: {parsed['error']}"
-                )
-            return parsed.get("result")
-        except (
-            HTTPError,
-            URLError,
-            TimeoutError,
-            RuntimeError,
-            json.JSONDecodeError,
-        ) as exc:
-            last_error = exc
-            if attempt == int(attempts) - 1:
-                break
-            time.sleep(min(2 ** attempt, 8))
-
-    raise RuntimeError(
-        f"RPC {method} failed after {attempts} attempts: {last_error}"
-    )
-
-
-def fetch_wallet_history_rpc(
-    rpc_url: str,
-    wallet: str,
-    *,
-    max_signatures: int = DEFAULT_RPC_MAX_SIGNATURES,
-    page_limit: int = DEFAULT_RPC_PAGE_LIMIT,
-    min_block_time_unix: int | None = None,
-    allow_bounded_history: bool = False,
-    rpc_call: Callable[[str, list[Any]], Any] | None = None,
-) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Fetch wallet history through standard Solana JSON-RPC.
-
-    Complete history is required by default. A bounded history is allowed only
-    when explicitly requested and is labeled incomplete for smoke/probe use.
-    """
-    wallet = validate_solana_address(wallet)
-    _safe_rpc_origin(rpc_url)
-    if not 1 <= int(page_limit) <= 1000:
-        raise ValueError("page_limit must be between 1 and 1000")
-    if int(max_signatures) < 1:
-        raise ValueError("max_signatures must be >= 1")
-    if min_block_time_unix is not None:
-        min_block_time_unix = int(min_block_time_unix)
-
-    caller = rpc_call or (
-        lambda method, params: _rpc_request(rpc_url, method, params)
-    )
-
-    signatures: list[dict[str, Any]] = []
-    before: str | None = None
-    reached_history_end = False
-    reached_time_floor = False
-
-    while len(signatures) < int(max_signatures):
-        remaining = int(max_signatures) - len(signatures)
-        limit = min(int(page_limit), remaining)
-        config: dict[str, Any] = {
-            "limit": limit,
-            "commitment": "finalized",
-        }
-        if before:
-            config["before"] = before
-        page = caller(
-            "getSignaturesForAddress",
-            [wallet, config],
-        )
-        if page is None:
-            raise RuntimeError(
-                f"getSignaturesForAddress returned null for {wallet}"
-            )
-        rows = list(page)
-        if not rows:
-            reached_history_end = True
-            break
-
-        stop = False
-        for row in rows:
-            if row.get("err") is not None:
-                continue
-            block_time = row.get("blockTime")
-            if (
-                min_block_time_unix is not None
-                and block_time is not None
-                and int(block_time) < min_block_time_unix
-            ):
-                reached_time_floor = True
-                stop = True
-                break
-            signatures.append(dict(row))
-            if len(signatures) >= int(max_signatures):
-                stop = True
-                break
-
-        if reached_time_floor:
-            break
-        if len(rows) < limit:
-            reached_history_end = True
-            break
-        if stop and len(signatures) >= int(max_signatures):
-            break
-
-        before = str(rows[-1].get("signature") or "")
-        if not before:
-            raise RuntimeError(
-                "signature pagination row missing signature"
-            )
-
-    bounded = not reached_history_end and not reached_time_floor
-    if bounded and not allow_bounded_history:
-        raise RuntimeError(
-            f"incomplete RPC wallet history for {wallet}: "
-            f"max_signatures={max_signatures} reached"
-        )
-
-    by_signature: dict[str, dict[str, Any]] = {}
-    missing_transaction_count = 0
-    for row in signatures:
-        signature = str(row.get("signature") or "")
-        if not signature:
-            continue
-        tx = caller(
-            "getTransaction",
-            [
-                signature,
-                {
-                    "commitment": "finalized",
-                    "encoding": "jsonParsed",
-                    "maxSupportedTransactionVersion": (
-                        DEFAULT_MAX_SUPPORTED_TRANSACTION_VERSION
-                    ),
-                },
-            ],
-        )
-        if tx is None:
-            missing_transaction_count += 1
-            continue
-        tx = dict(tx)
-        if tx.get("slot") is None and row.get("slot") is not None:
-            tx["slot"] = int(row["slot"])
-        if (
-            tx.get("blockTime") is None
-            and row.get("blockTime") is not None
-        ):
-            tx["blockTime"] = int(row["blockTime"])
-        existing = by_signature.get(signature)
-        if existing is not None:
-            if _canonical_json(existing) != _canonical_json(tx):
-                raise ValueError(
-                    f"conflicting RPC payload for signature {signature}"
-                )
-            continue
-        by_signature[signature] = tx
-
-    rows = sorted(
-        by_signature.values(),
-        key=lambda tx: (
-            int(tx.get("blockTime"))
-            if tx.get("blockTime") is not None
-            else 2**63 - 1,
-            int(tx.get("slot") or 0),
-            _signature(tx),
-        ),
-    )
-    times = [
-        int(tx["blockTime"])
-        for tx in rows
-        if tx.get("blockTime") is not None
-    ]
-    return rows, {
-        "wallet": wallet,
-        "provider": "solana-json-rpc",
-        "source_origin": _safe_rpc_origin(rpc_url),
-        "signature_count": len(signatures),
-        "transaction_count": len(rows),
-        "missing_transaction_count": missing_transaction_count,
-        "history_complete": bool(reached_history_end),
-        "bounded_history": bool(bounded),
-        "time_floor_reached": bool(reached_time_floor),
-        "min_block_time_unix": min_block_time_unix,
-        "first_block_time": min(times) if times else None,
-        "last_block_time": max(times) if times else None,
-    }
 
 
 def fetch_complete_wallet_history(
@@ -893,77 +666,6 @@ def collect_real_histories(
     }
 
 
-def collect_real_histories_rpc(
-    rpc_url: str,
-    wallets: Iterable[str],
-    *,
-    max_signatures_per_wallet: int = DEFAULT_RPC_MAX_SIGNATURES,
-    page_limit: int = DEFAULT_RPC_PAGE_LIMIT,
-    min_block_time_unix: int | None = None,
-    allow_bounded_history: bool = False,
-    rpc_call: Callable[[str, list[Any]], Any] | None = None,
-) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any]]:
-    raw_by_wallet: dict[str, list[dict[str, Any]]] = {}
-    wallet_reports: list[dict[str, Any]] = []
-
-    for wallet in sorted({
-        validate_solana_address(value) for value in wallets
-    }):
-        rows, report = fetch_wallet_history_rpc(
-            rpc_url,
-            wallet,
-            max_signatures=max_signatures_per_wallet,
-            page_limit=page_limit,
-            min_block_time_unix=min_block_time_unix,
-            allow_bounded_history=allow_bounded_history,
-            rpc_call=rpc_call,
-        )
-        raw_by_wallet[wallet] = rows
-        wallet_reports.append(report)
-
-    return raw_by_wallet, {
-        "provider": "solana-json-rpc",
-        "source_origin": _safe_rpc_origin(rpc_url),
-        "wallet_count": len(raw_by_wallet),
-        "wallet_reports": wallet_reports,
-        "history_complete_for_all_wallets": all(
-            bool(row["history_complete"]) for row in wallet_reports
-        ),
-        "bounded_history_present": any(
-            bool(row["bounded_history"]) for row in wallet_reports
-        ),
-        "raw_transaction_rows_across_wallets": sum(
-            len(rows) for rows in raw_by_wallet.values()
-        ),
-    }
-
-
-def _refinement_discovery_cutoff(
-    refinement_file: str | None,
-) -> int | None:
-    if not refinement_file:
-        return None
-    parsed = json.loads(
-        Path(refinement_file).read_text(encoding="utf-8")
-    )
-    refinement = (
-        parsed.get("refinement")
-        if isinstance(parsed, dict) and "refinement" in parsed
-        else parsed
-    )
-    if not isinstance(refinement, dict):
-        raise ValueError(
-            "refinement file must contain a Stage-10A-1A object"
-        )
-    times = [
-        int(event["block_time"])
-        for record in refinement.get("records") or []
-        for event in record.get("events") or []
-        if event.get("block_time") is not None
-    ]
-    return max(times) if times else None
-
-
 def persist_stage10a_backfill(
     client: SupabaseRestClient,
     *,
@@ -1111,8 +813,8 @@ def main() -> int:
         "--universe-file",
         default=None,
         help=(
-            "Stage-10A-0 discovery artifact. Manual/raw universe input is "
-            "primarily for bootstrap/debugging."
+            "Stage-10A-0 discovery artifact. Preferred production handoff; "
+            "manual wallet inputs remain bootstrap/test only."
         ),
     )
     parser.add_argument(
@@ -1124,54 +826,10 @@ def main() -> int:
         ),
     )
     parser.add_argument(
-        "--history-source",
-        choices=["rpc", "helius"],
-        default="rpc",
-        help="Historical transaction provider.",
-    )
-    parser.add_argument(
-        "--rpc-url",
-        default=(
-            os.environ.get("SOLANA_RPC_URL")
-            or DEFAULT_SOLANA_RPC_URL
-        ),
-    )
-    parser.add_argument(
-        "--rpc-max-signatures-per-wallet",
-        type=int,
-        default=DEFAULT_RPC_MAX_SIGNATURES,
-    )
-    parser.add_argument(
-        "--rpc-page-limit",
-        type=int,
-        default=DEFAULT_RPC_PAGE_LIMIT,
-    )
-    parser.add_argument(
-        "--history-min-block-time-unix",
-        type=int,
-        default=None,
-        help=(
-            "Optional lower time floor for RPC history. Reaching this floor "
-            "is explicit bounded coverage, not full lifetime history."
-        ),
-    )
-    parser.add_argument(
-        "--allow-bounded-history",
-        action="store_true",
-        help=(
-            "Allow explicitly incomplete RPC history for smoke/probe use. "
-            "Do not use bounded history as full qualification evidence."
-        ),
-    )
-    parser.add_argument(
         "--signal-from-unix",
         type=int,
-        default=None,
-        help=(
-            "Earliest timestamp for emitted Stage-9 snapshots. When a "
-            "refinement file is supplied, defaults to strictly after the "
-            "discovery cutoff."
-        ),
+        required=True,
+        help="Earliest timestamp for emitted Stage-9 snapshots",
     )
     parser.add_argument(
         "--signal-to-unix",
@@ -1188,12 +846,6 @@ def main() -> int:
         "--max-pages-per-wallet",
         type=int,
         default=DEFAULT_MAX_PAGES_PER_WALLET,
-    )
-    parser.add_argument(
-        "--max-wallets",
-        type=int,
-        default=None,
-        help="Optional deterministic wallet cap for smoke/probe cohorts.",
     )
     parser.add_argument(
         "--dry-run",
@@ -1213,98 +865,38 @@ def main() -> int:
         args.universe_file,
         args.refinement_file,
     )
-    if args.max_wallets is not None:
-        if int(args.max_wallets) < 1:
-            raise SystemExit("--max-wallets must be >= 1")
-        wallets = wallets[: int(args.max_wallets)]
+    api_key = os.environ.get("HELIUS_API_KEY")
+    if not api_key:
+        raise SystemExit("HELIUS_API_KEY is required")
 
-    discovery_cutoff = _refinement_discovery_cutoff(
-        args.refinement_file
+    raw_by_wallet, fetch_report = collect_real_histories(
+        api_key,
+        wallets,
+        page_limit=args.page_limit,
+        max_pages_per_wallet=args.max_pages_per_wallet,
     )
-    signal_from = args.signal_from_unix
-    if signal_from is None and discovery_cutoff is not None:
-        signal_from = discovery_cutoff + 1
-
-    raw_source = "helius_gtfa"
-    if args.history_source == "helius":
-        api_key = os.environ.get("HELIUS_API_KEY")
-        if not api_key:
-            raise SystemExit(
-                "HELIUS_API_KEY is required for --history-source helius"
-            )
-        raw_by_wallet, fetch_report = collect_real_histories(
-            api_key,
-            wallets,
-            page_limit=args.page_limit,
-            max_pages_per_wallet=args.max_pages_per_wallet,
-        )
-    else:
-        raw_source = "solana_json_rpc"
-        raw_by_wallet, fetch_report = collect_real_histories_rpc(
-            args.rpc_url,
-            wallets,
-            max_signatures_per_wallet=(
-                args.rpc_max_signatures_per_wallet
-            ),
-            page_limit=args.rpc_page_limit,
-            min_block_time_unix=args.history_min_block_time_unix,
-            allow_bounded_history=args.allow_bounded_history,
-        )
-
     normalized, normalize_report = normalize_wallet_histories(
         raw_by_wallet
     )
-
     replay = build_causal_historical_replay(
         normalized,
-        signal_from_unix=signal_from,
+        signal_from_unix=args.signal_from_unix,
         signal_to_unix=args.signal_to_unix,
-        universe_effective_after_unix=discovery_cutoff,
     )
-
-    bounded_history = bool(
-        fetch_report.get("bounded_history_present")
-    )
-    if bounded_history:
-        # A bounded history is valid for transport/normalization smoke work,
-        # but it must not be represented as qualification-grade full history.
-        replay["methodology"]["qualification_grade_history"] = False
-        replay["methodology"]["bounded_history_warning"] = (
-            "history is explicitly incomplete; do not interpret current "
-            "classification as full-lifetime wallet qualification"
-        )
-    else:
-        replay["methodology"]["qualification_grade_history"] = bool(
-            fetch_report.get("history_complete_for_all_wallets")
-        )
 
     persistence = None
     if not args.dry_run:
-        if bounded_history:
-            raise SystemExit(
-                "bounded history cannot be persisted as production "
-                "qualification evidence; rerun without --allow-bounded-history"
-            )
         client = SupabaseRestClient.from_env()
         persistence = persist_stage10a_backfill(
             client,
             raw_by_wallet=raw_by_wallet,
             normalized_by_wallet=normalized,
             replay=replay,
-            raw_source=raw_source,
         )
 
     report = {
         "version": STAGE10A_VERSION,
         "source_kind": "REAL",
-        "history_source": args.history_source,
-        "raw_source": raw_source,
-        "wallet_selection": {
-            "wallet_count": len(wallets),
-            "refinement_file": bool(args.refinement_file),
-            "max_wallets": args.max_wallets,
-            "discovery_cutoff_unix": discovery_cutoff,
-        },
         "fetch": fetch_report,
         "normalization": normalize_report,
         "causal_replay": replay,
@@ -1315,36 +907,6 @@ def main() -> int:
     }
     report["report_fingerprint"] = _fingerprint(report)
     _write_json(args.out, report)
-    print(json.dumps({
-        "history_source": args.history_source,
-        "wallet_count": len(wallets),
-        "raw_transaction_rows": fetch_report[
-            "raw_transaction_rows_across_wallets"
-        ],
-        "normalized_event_count": normalize_report[
-            "normalized_event_count"
-        ],
-        "history_complete_for_all_wallets": fetch_report[
-            "history_complete_for_all_wallets"
-        ],
-        "bounded_history_present": bool(
-            fetch_report.get("bounded_history_present")
-        ),
-        "registry_snapshot_count": len(
-            replay.get("registry_snapshots") or []
-        ),
-        "transition_count": len(replay.get("transitions") or []),
-        "wallet_event_count": len(
-            replay.get("wallet_events") or []
-        ),
-        "signal_snapshot_count": len(
-            replay.get("signal_snapshots") or []
-        ),
-        "qualification_grade_history": replay["methodology"].get(
-            "qualification_grade_history"
-        ),
-        "persisted": not args.dry_run,
-    }, indent=2))
     return 0
 
 
