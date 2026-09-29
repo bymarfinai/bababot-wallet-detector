@@ -180,6 +180,117 @@ def candidate_universe_rows(
     return snapshot_row, candidate_rows, evidence_rows
 
 
+def candidate_refinement_rows(
+    universe: dict[str, Any],
+    refinement: dict[str, Any],
+) -> tuple[
+    dict[str, Any],
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+]:
+    snapshot, candidates, evidence = candidate_universe_rows(universe)
+
+    universe_fp = str(universe.get("universe_fingerprint") or "")
+    if str(refinement.get("source_universe_fingerprint") or "") != universe_fp:
+        raise ValueError("refinement source universe does not match universe")
+    if str(refinement.get("version") or "") != "wallet-s10a1a-v1":
+        raise ValueError("unsupported Stage-10A-1A refinement version")
+
+    snapshot.update({
+        "refinement_version": refinement["version"],
+        "refinement_fingerprint": refinement["refinement_fingerprint"],
+        "trader_candidate_wallet_count": int(
+            refinement.get("trader_candidate_wallet_count") or 0
+        ),
+        "non_trader_activity_wallet_count": int(
+            refinement.get("non_trader_activity_wallet_count") or 0
+        ),
+        "meme_buy_candidate_wallet_count": int(
+            refinement.get("meme_buy_candidate_wallet_count") or 0
+        ),
+        "refinement_payload": refinement,
+    })
+
+    refinement_by_wallet = {
+        str(row["wallet"]): row
+        for row in refinement.get("records") or []
+    }
+    for row in candidates:
+        refined = refinement_by_wallet.get(str(row["wallet"]))
+        if refined is None:
+            raise ValueError(
+                f"missing refinement record for wallet {row['wallet']}"
+            )
+        row.update({
+            "refinement_version": refined["version"],
+            "refinement_record_fingerprint": refined[
+                "record_fingerprint"
+            ],
+            "candidate_status": refined["candidate_status"],
+            "trader_candidate": bool(refined["trader_candidate"]),
+            "meme_buy_candidate": bool(
+                refined["meme_buy_candidate"]
+            ),
+            "historical_backfill_eligible": bool(
+                refined["historical_backfill_eligible"]
+            ),
+            "trader_event_count": int(
+                refined.get("trader_event_count") or 0
+            ),
+            "buy_event_count": int(
+                refined.get("buy_event_count") or 0
+            ),
+            "sell_event_count": int(
+                refined.get("sell_event_count") or 0
+            ),
+            "meme_buy_event_count": int(
+                refined.get("meme_buy_event_count") or 0
+            ),
+            "observed_base_assets": list(
+                refined.get("observed_base_assets") or []
+            ),
+            "refinement_payload": refined,
+        })
+
+    refinement_events = {
+        (str(record["wallet"]), str(event["signature"])): event
+        for record in refinement.get("records") or []
+        for event in record.get("events") or []
+    }
+    for row in evidence:
+        key = (str(row["wallet"]), str(row["signature"]))
+        refined = refinement_events.get(key)
+        if refined is None:
+            raise ValueError(
+                "missing refinement event for "
+                f"{row['wallet']}:{row['signature']}"
+            )
+        row.update({
+            "refinement_version": refined["version"],
+            "refinement_event_fingerprint": refined[
+                "event_fingerprint"
+            ],
+            "stage2_version": refined.get("stage2_version"),
+            "event_type": refined.get("event_type"),
+            "side": refined.get("side"),
+            "base_asset": refined.get("base_asset"),
+            "quote_asset": refined.get("quote_asset"),
+            "confidence": refined.get("confidence"),
+            "trader_candidate_event": bool(
+                refined["trader_candidate_event"]
+            ),
+            "meme_buy_candidate_event": bool(
+                refined["meme_buy_candidate_event"]
+            ),
+            "refinement_reason": refined.get("refinement_reason"),
+            "stage2_normalized_payload": refined.get(
+                "normalized_event"
+            ),
+        })
+
+    return snapshot, candidates, evidence
+
+
 def raw_wallet_transaction_row(
     wallet: str,
     tx: dict[str, Any],
@@ -502,6 +613,36 @@ class SupabaseRestClient:
         universe: dict[str, Any],
     ) -> dict[str, int]:
         snapshot, candidates, evidence = candidate_universe_rows(universe)
+        snapshot_count = self.upsert_rows(
+            "wallet_universe_snapshots",
+            [snapshot],
+            on_conflict="universe_fingerprint",
+        )
+        candidate_count = self.upsert_rows(
+            "wallet_universe_candidates",
+            candidates,
+            on_conflict="universe_fingerprint,wallet",
+        )
+        evidence_count = self.upsert_rows(
+            "wallet_universe_evidence",
+            evidence,
+            on_conflict="universe_fingerprint,wallet,signature",
+        )
+        return {
+            "wallet_universe_snapshot_rows": snapshot_count,
+            "wallet_universe_candidate_rows": candidate_count,
+            "wallet_universe_evidence_rows": evidence_count,
+        }
+
+    def persist_candidate_refinement(
+        self,
+        universe: dict[str, Any],
+        refinement: dict[str, Any],
+    ) -> dict[str, int]:
+        snapshot, candidates, evidence = candidate_refinement_rows(
+            universe,
+            refinement,
+        )
         snapshot_count = self.upsert_rows(
             "wallet_universe_snapshots",
             [snapshot],
