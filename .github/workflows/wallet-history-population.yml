@@ -127,6 +127,59 @@ jobs:
         run: |
           SHARD_DIR="/tmp/stage10a1b/shard-$SHARD_INDEX"
           mkdir -p "$SHARD_DIR"
+          if [ "$INDEXED_RPC_CONFIGURED" = "true" ] || [ "$HELIUS_CONFIGURED" = "true" ]; then
+            cp /tmp/input/high-volume-refinement.json "$OUT/indexed-provider-refinement.json"
+            python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          from research.wallet_s10a1_candidate_refinement import (
+              wallet_addresses_from_refinement,
+          )
+
+          shard_index = int(os.environ["SHARD_INDEX"])
+          refinement = json.loads(
+              Path("/tmp/input/high-volume-refinement.json").read_text()
+          )["refinement"]
+          wallets = wallet_addresses_from_refinement(
+              refinement,
+              trader_only=True,
+          )
+          root = Path(f"/tmp/stage10a1b-high/shard-{shard_index}")
+          plan = {
+              "provider": "indexed_provider_direct",
+              "wallet_count": len(wallets),
+              "standard_wallet_count": 0,
+              "high_volume_wallet_count": len(wallets),
+              "standard_wallets": [],
+              "high_volume_wallets": wallets,
+              "policy": {
+                  "quality_filter": None,
+                  "high_volume_is_unqualified": False,
+                  "high_volume_action": "DIRECT_INDEXED_PROVIDER",
+              },
+          }
+          (root / "deep-capacity-plan.json").write_text(
+              json.dumps(plan, indent=2, sort_keys=True) + "\n"
+          )
+          summary = {
+              "source_high_volume_wallet_count": len(wallets),
+              "public_rpc_eligible_wallet_count": 0,
+              "indexed_provider_wallet_count": len(wallets),
+              "public_rpc_signature_cap": 100,
+              "public_rpc_completed": False,
+              "routing_policy": (
+                  "PUBLIC_RPC_UP_TO_100_SIGNATURES_ELSE_INDEXED_PROVIDER"
+              ),
+          }
+          (root / "high-volume-summary.json").write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(summary, indent=2))
+          PY
+            exit 0
+          fi
+
           python - <<'PY'
           import json
           import os
@@ -273,6 +326,8 @@ jobs:
         env:
           HISTORY_AS_OF_UNIX: ${{ needs.prepare.outputs.history_as_of_unix }}
           SHARD_INDEX: ${{ matrix.shard }}
+          INDEXED_RPC_CONFIGURED: ${{ needs.prepare.outputs.indexed_rpc_configured }}
+          HELIUS_CONFIGURED: ${{ needs.prepare.outputs.helius_configured }}
         run: |
           OUT="/tmp/stage10a1b-high/shard-$SHARD_INDEX"
           mkdir -p "$OUT"
@@ -677,7 +732,10 @@ jobs:
                   == high_volume
               ),
               "high_volume_policy": (
-                  "PUBLIC_RPC_UP_TO_500_SIGNATURES_ELSE_INDEXED_PROVIDER"
+                  "PUBLIC_RPC_UP_TO_100_SIGNATURES_ELSE_INDEXED_PROVIDER"
+                  if os.environ["INDEXED_RPC_CONFIGURED"] == "true"
+                  or os.environ["HELIUS_CONFIGURED"] == "true"
+                  else "PUBLIC_RPC_UP_TO_500_SIGNATURES_WITH_INDEXED_PENDING"
               ),
               "qualification_grade_history_wallet_count": (
                   standard
