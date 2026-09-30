@@ -17,6 +17,7 @@ from research.wallet_s10a1b_real_historical_backfill import (
     build_refinement_subset,
     build_stage10a1b_evidence_report,
     build_stage10a1b_report,
+    collect_indexed_histories_as_of,
     collect_solana_rpc_histories,
     plan_solana_rpc_history_capacity,
     refinement_effective_after_unix,
@@ -243,6 +244,77 @@ class Stage10A1BRealBackfillTests(unittest.TestCase):
                 {WALLET_A: profitable_round_trips(1)},
                 signal_from_unix=1000,
                 universe_effective_after_unix=1000,
+            )
+
+    def test_indexed_gtfa_collects_complete_history_and_redacts_secret(self):
+        pages = []
+
+        def fetch_page(_credential, wallet, limit, pagination_token):
+            pages.append((wallet, limit, pagination_token))
+            if pagination_token is None:
+                return {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": {
+                        "data": [
+                            raw_tx("future", 1100),
+                            raw_tx("old", 900),
+                        ],
+                        "paginationToken": "next-page",
+                    },
+                }
+            return {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "result": {
+                    "data": [raw_tx("older", 800)],
+                    "paginationToken": None,
+                },
+            }
+
+        raw, report = collect_indexed_histories_as_of(
+            "https://solana-mainnet.g.alchemy.com/v2/SECRET_KEY",
+            "alchemy-solana-gtfa",
+            [WALLET_A],
+            as_of_unix=1000,
+            page_limit=100,
+            fetch_page=fetch_page,
+        )
+
+        self.assertTrue(report["qualification_grade"])
+        self.assertEqual(report["provider"], "indexed_gtfa")
+        self.assertEqual(report["source_label"], "alchemy-solana-gtfa")
+        self.assertEqual(
+            report["source_origin"],
+            "https://solana-mainnet.g.alchemy.com/",
+        )
+        self.assertNotIn("SECRET_KEY", json.dumps(report))
+        self.assertEqual(
+            [tx["transaction"]["signatures"][0] for tx in raw[WALLET_A]],
+            ["older", "old"],
+        )
+        self.assertEqual(len(pages), 2)
+
+    def test_indexed_gtfa_page_cap_fails_closed(self):
+        def fetch_page(_credential, wallet, limit, pagination_token):
+            return {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": {
+                    "data": [raw_tx("sig", 900)],
+                    "paginationToken": "never-exhausts",
+                },
+            }
+
+        with self.assertRaises(RuntimeError):
+            collect_indexed_histories_as_of(
+                "https://indexed.example/v2/SECRET",
+                "indexed-provider",
+                [WALLET_A],
+                as_of_unix=1000,
+                page_limit=100,
+                max_pages_per_wallet=1,
+                fetch_page=fetch_page,
             )
 
     def test_native_rpc_collects_complete_history_and_filters_as_of(self):
