@@ -668,33 +668,42 @@ Real population workflow:
 .github/workflows/wallet-history-population.yml
 ```
 
-Latest successful population run:
+Latest successful population run audited:
 
 ```text
-run                         = 36511958904
-activity candidates         = 92
-trader candidates           = 65
-meme-buy candidates         = 36
-STANDARD wallets            = 10
-HIGH_VOLUME wallets         = 55
-STANDARD raw tx rows        = 187
-STANDARD normalized rows    = 187
+run                         = 36523741526
+run number                  = 8
+activity candidates         = 207
+trader candidates           = 181
+meme-buy candidates         = 123
+STANDARD wallets            = 26
+HIGH_VOLUME wallets         = 155
+STANDARD raw tx rows        = 327
+STANDARD normalized rows    = 327
+HIGH_VOLUME <=500 RPC       = 11
+HIGH_VOLUME indexed pending = 144
+HIGH_VOLUME RPC raw rows    = 4,026
+HIGH_VOLUME RPC norm rows   = 4,026
+qualification-grade wallets = 37 / 181
 lane partition complete     = true
 ```
+
+Artifact-level audit confirmed all 37 completed wallets have `qualification_grade=true`. The remaining 144 wallets require the indexed/high-capacity history lane.
 
 Native Solana RPC also passed a real qualification-grade full-single-wallet backfill with `getFirstAvailableBlock = 0`, proving archive-from-genesis access in the tested provider path.
 
 Important: `HIGH_VOLUME` is only an execution-capacity lane. It does **not** mean the wallet is bad or unqualified.
 
-The current GitHub runtime has neither `HELIUS_API_KEY` nor `WALLET_SUPABASE_SECRET_KEY`, so:
+The latest audited GitHub runtime had neither `HELIUS_API_KEY` nor `WALLET_SUPABASE_SECRET_KEY`, so:
 
 ```text
-STANDARD evidence artifacts = PASS
-HIGH_VOLUME completion       = PENDING higher-capacity/indexed history provider
-Supabase production writes  = PENDING server-side write secret
+qualification-grade history = 37 / 181 wallets
+indexed-provider completion = 144 wallets pending
+workflow persistence         = 0 / 181 wallets
+Supabase production writes   = PENDING server-side write secret
 ```
 
-Live Supabase historical evidence tables therefore remain unpopulated at this checkpoint. The workflow intentionally preserves auditable raw/normalized artifacts instead of claiming persistence that did not happen.
+The completed evidence artifacts are auditable, but Stage 10A-1B remains partial. A successful workflow conclusion must not be interpreted as full Stage-10A-1B acceptance until both 181/181 qualification-grade history coverage and 181/181 server-side persistence are verified.
 
 See:
 
