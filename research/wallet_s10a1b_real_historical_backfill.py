@@ -112,7 +112,7 @@ def _fetch_indexed_gtfa_page(
     )
     # Versioned Solana transactions require the client to opt in.
     # Alchemy returns -32015 when this field is omitted.
-    payload["params"][1]["maxSupportedTransactionVersion"] = 0
+    payload["params"][1]["maxSupportedTransactionVersion"] = DEFAULT_MAX_SUPPORTED_TRANSACTION_VERSION
     body = json.dumps(payload).encode("utf-8")
     headers = {"Content-Type": "application/json"}
     sender = transport or _default_transport
@@ -1373,6 +1373,20 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--indexed-max-pages-per-wallet",
+        type=int,
+        default=int(
+            os.environ.get(
+                "INDEXED_SOLANA_MAX_PAGES_PER_WALLET",
+                "5000",
+            )
+        ),
+        help=(
+            "Fail-closed page cap for indexed full-history pagination. "
+            "Alchemy full transaction mode returns at most 100 rows/page."
+        ),
+    )
+    parser.add_argument(
         "--signature-page-limit",
         type=int,
         default=DEFAULT_SIGNATURE_PAGE_LIMIT,
@@ -1488,6 +1502,7 @@ def main() -> int:
             args.indexed_source_label,
             wallets,
             as_of_unix=args.history_as_of_unix,
+            max_pages_per_wallet=args.indexed_max_pages_per_wallet,
         )
         raw_source = "indexed_gtfa"
 
