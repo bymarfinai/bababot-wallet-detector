@@ -94,6 +94,8 @@ def _fetch_indexed_gtfa_page(
     attempts: int = 8,
     transport: RpcTransport | None = None,
     request_delay_seconds: float = 0.0,
+    history_as_of_unix: int | None = None,
+    resume_before_signature: str | None = None,
 ) -> dict[str, Any]:
     """Fetch one provider-neutral getTransactionsForAddress page.
 
@@ -115,7 +117,16 @@ def _fetch_indexed_gtfa_page(
     )
     # Versioned Solana transactions require the client to opt in.
     # Alchemy returns -32015 when this field is omitted.
-    payload["params"][1]["maxSupportedTransactionVersion"] = DEFAULT_MAX_SUPPORTED_TRANSACTION_VERSION
+    payload["params"][1]["maxSupportedTransactionVersion"] = (
+        DEFAULT_MAX_SUPPORTED_TRANSACTION_VERSION
+    )
+    filters = payload["params"][1]["filters"]
+    if history_as_of_unix is not None:
+        filters["blockTime"] = {"lte": int(history_as_of_unix)}
+    if resume_before_signature:
+        filters["signature"] = {
+            "lt": str(resume_before_signature),
+        }
     body = json.dumps(payload).encode("utf-8")
     headers = {"Content-Type": "application/json"}
     sender = transport or _default_transport
