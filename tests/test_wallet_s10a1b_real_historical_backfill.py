@@ -17,6 +17,7 @@ from research.wallet_s10a1b_real_historical_backfill import (
     build_refinement_subset,
     build_stage10a1b_evidence_report,
     build_stage10a1b_report,
+    _fetch_indexed_gtfa_page,
     collect_indexed_histories_as_of,
     collect_solana_rpc_histories,
     plan_solana_rpc_history_capacity,
@@ -245,6 +246,36 @@ class Stage10A1BRealBackfillTests(unittest.TestCase):
                 signal_from_unix=1000,
                 universe_effective_after_unix=1000,
             )
+
+    def test_indexed_gtfa_requests_versioned_transactions(self):
+        seen = {}
+
+        def transport(method, url, headers, body):
+            payload = json.loads(body.decode("utf-8"))
+            seen["payload"] = payload
+            return 200, json.dumps({
+                "jsonrpc": "2.0",
+                "id": payload["id"],
+                "result": {
+                    "data": [],
+                    "paginationToken": None,
+                },
+            }).encode("utf-8")
+
+        _fetch_indexed_gtfa_page(
+            "https://indexed.example/v2/SECRET",
+            WALLET_A,
+            100,
+            None,
+            attempts=1,
+            transport=transport,
+        )
+
+        options = seen["payload"]["params"][1]
+        self.assertEqual(
+            options["maxSupportedTransactionVersion"],
+            0,
+        )
 
     def test_indexed_gtfa_collects_complete_history_and_redacts_secret(self):
         pages = []
