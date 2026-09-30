@@ -14,6 +14,7 @@ jobs:
       history_as_of_unix: ${{ steps.freeze.outputs.history_as_of_unix }}
       trader_wallet_count: ${{ steps.freeze.outputs.trader_wallet_count }}
       helius_configured: ${{ steps.capabilities.outputs.helius_configured }}
+      indexed_rpc_configured: ${{ steps.capabilities.outputs.indexed_rpc_configured }}
       supabase_write_configured: ${{ steps.capabilities.outputs.supabase_write_configured }}
     steps:
       - name: Checkout
@@ -26,6 +27,7 @@ jobs:
         id: capabilities
         env:
           HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
+          ALCHEMY_SOLANA_RPC_URL: ${{ secrets.ALCHEMY_SOLANA_RPC_URL }}
           WALLET_SUPABASE_SECRET_KEY: ${{ secrets.WALLET_SUPABASE_SECRET_KEY }}
         run: |
           if [ -n "$HELIUS_API_KEY" ]; then
@@ -34,6 +36,13 @@ jobs:
           else
             echo "helius_configured=false" >> "$GITHUB_OUTPUT"
             echo "Helius server credential configured: no"
+          fi
+          if [ -n "$ALCHEMY_SOLANA_RPC_URL" ]; then
+            echo "indexed_rpc_configured=true" >> "$GITHUB_OUTPUT"
+            echo "Indexed Solana RPC credential configured: yes"
+          else
+            echo "indexed_rpc_configured=false" >> "$GITHUB_OUTPUT"
+            echo "Indexed Solana RPC credential configured: no"
           fi
           if [ -n "$WALLET_SUPABASE_SECRET_KEY" ]; then
             echo "supabase_write_configured=true" >> "$GITHUB_OUTPUT"
@@ -423,9 +432,10 @@ jobs:
               json.dumps(summary, indent=2, sort_keys=True) + "\n"
           )
           PY
-      - name: Backfill remaining HIGH_VOLUME with Helius when configured
-        if: needs.prepare.outputs.helius_configured == 'true'
+      - name: Backfill remaining HIGH_VOLUME with indexed provider
+        if: needs.prepare.outputs.indexed_rpc_configured == 'true' || needs.prepare.outputs.helius_configured == 'true'
         env:
+          ALCHEMY_SOLANA_RPC_URL: ${{ secrets.ALCHEMY_SOLANA_RPC_URL }}
           HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
           WALLET_SUPABASE_URL: https://yuqkodwdqaggsexbqiqa.supabase.co
           WALLET_SUPABASE_SECRET_KEY: ${{ secrets.WALLET_SUPABASE_SECRET_KEY }}
@@ -443,14 +453,55 @@ jobs:
             PERSIST_ARGS=""
           fi
 
+          if [ -n "$ALCHEMY_SOLANA_RPC_URL" ]; then
+            PROVIDER_ARGS="--provider indexed-rpc --indexed-rpc-url $ALCHEMY_SOLANA_RPC_URL --indexed-source-label alchemy-solana-gtfa"
+          elif [ -n "$HELIUS_API_KEY" ]; then
+            PROVIDER_ARGS="--provider helius"
+          else
+            echo "No indexed history provider credential available"
+            exit 1
+          fi
+
           python -m research.wallet_s10a1b_real_historical_backfill \
             --refinement-file "$OUT/indexed-provider-refinement.json" \
-            --provider helius \
+            $PROVIDER_ARGS \
             --history-as-of-unix "$HISTORY_AS_OF_UNIX" \
             --evidence-only \
             --evidence-dir "$OUT/indexed-evidence" \
             $PERSIST_ARGS \
             --out "$OUT/indexed-result.json"
+
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          root = Path(f"/tmp/stage10a1b-high/shard-{os.environ['SHARD_INDEX']}")
+          summary = json.loads(
+              (root / "high-volume-summary.json").read_text()
+          )
+          result = json.loads(
+              (root / "indexed-result.json").read_text()
+          )["backfill"]
+          summary["indexed_provider_completed"] = True
+          summary["indexed_provider_name"] = result["fetch"].get("provider")
+          summary["indexed_provider_source_label"] = result["fetch"].get(
+              "source_label"
+          )
+          summary["indexed_provider_qualification_grade"] = bool(
+              result["fetch"].get("qualification_grade")
+          )
+          summary["indexed_provider_raw_transaction_rows"] = int(
+              result["fetch"].get(
+                  "raw_transaction_rows_across_wallets"
+              ) or 0
+          )
+          summary["indexed_provider_normalized_event_rows"] = int(
+              result["normalization"].get("normalized_event_count") or 0
+          )
+          (root / "high-volume-summary.json").write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          PY
       - name: Upload HIGH_VOLUME plan and evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -482,6 +533,7 @@ jobs:
         env:
           EXPECTED_TRADER_COUNT: ${{ needs.prepare.outputs.trader_wallet_count }}
           HELIUS_CONFIGURED: ${{ needs.prepare.outputs.helius_configured }}
+          INDEXED_RPC_CONFIGURED: ${{ needs.prepare.outputs.indexed_rpc_configured }}
           SUPABASE_WRITE_CONFIGURED: ${{ needs.prepare.outputs.supabase_write_configured }}
         run: |
           python - <<'PY'
@@ -500,6 +552,11 @@ jobs:
           public_rpc_hv_raw_rows = 0
           public_rpc_hv_normalized_rows = 0
           public_rpc_hv_incomplete_shards = 0
+          indexed_completed_wallets = 0
+          indexed_raw_rows = 0
+          indexed_normalized_rows = 0
+          indexed_incomplete_shards = 0
+          indexed_non_qualification_grade_shards = 0
 
           for plan_path in Path("/tmp/shards").rglob("capacity-plan.json"):
               plan = json.loads(plan_path.read_text())
@@ -547,6 +604,24 @@ jobs:
                       )
                   else:
                       public_rpc_hv_incomplete_shards += 1
+              indexed_count = int(
+                  hv.get("indexed_provider_wallet_count") or 0
+              )
+              if indexed_count:
+                  if bool(hv.get("indexed_provider_completed")):
+                      indexed_completed_wallets += indexed_count
+                      indexed_raw_rows += int(
+                          hv.get("indexed_provider_raw_transaction_rows") or 0
+                      )
+                      indexed_normalized_rows += int(
+                          hv.get("indexed_provider_normalized_event_rows") or 0
+                      )
+                      if not bool(
+                          hv.get("indexed_provider_qualification_grade")
+                      ):
+                          indexed_non_qualification_grade_shards += 1
+                  else:
+                      indexed_incomplete_shards += 1
 
           expected = int(os.environ["EXPECTED_TRADER_COUNT"])
           summary = {
@@ -564,6 +639,9 @@ jobs:
               "standard_normalized_event_rows": normalized_rows,
               "helius_configured": (
                   os.environ["HELIUS_CONFIGURED"] == "true"
+              ),
+              "indexed_rpc_configured": (
+                  os.environ["INDEXED_RPC_CONFIGURED"] == "true"
               ),
               "supabase_write_configured": (
                   os.environ["SUPABASE_WRITE_CONFIGURED"] == "true"
@@ -583,12 +661,36 @@ jobs:
               "high_volume_public_rpc_incomplete_shards": (
                   public_rpc_hv_incomplete_shards
               ),
+              "high_volume_indexed_completed_wallet_count": (
+                  indexed_completed_wallets
+              ),
+              "high_volume_indexed_raw_rows": indexed_raw_rows,
+              "high_volume_indexed_normalized_rows": indexed_normalized_rows,
+              "high_volume_indexed_incomplete_shards": (
+                  indexed_incomplete_shards
+              ),
+              "high_volume_indexed_non_qualification_grade_shards": (
+                  indexed_non_qualification_grade_shards
+              ),
               "high_volume_second_lane_partition_complete": (
                   public_rpc_hv_wallets + indexed_provider_wallets
                   == high_volume
               ),
               "high_volume_policy": (
                   "PUBLIC_RPC_UP_TO_500_SIGNATURES_ELSE_INDEXED_PROVIDER"
+              ),
+              "qualification_grade_history_wallet_count": (
+                  standard
+                  + public_rpc_hv_wallets
+                  + indexed_completed_wallets
+              ),
+              "full_history_complete": (
+                  standard
+                  + public_rpc_hv_wallets
+                  + indexed_completed_wallets
+                  == expected
+                  and indexed_incomplete_shards == 0
+                  and indexed_non_qualification_grade_shards == 0
               ),
           }
           print(json.dumps(summary, indent=2))
@@ -599,6 +701,13 @@ jobs:
           assert summary["failed_or_incomplete_standard_shards"] == 0
           assert summary["high_volume_second_lane_partition_complete"]
           assert summary["high_volume_public_rpc_incomplete_shards"] == 0
+          if summary["indexed_rpc_configured"] or summary["helius_configured"]:
+              assert summary["high_volume_indexed_incomplete_shards"] == 0
+              assert (
+                  summary["high_volume_indexed_non_qualification_grade_shards"]
+                  == 0
+              )
+              assert summary["full_history_complete"]
           PY
       - name: Upload population summary
         uses: actions/upload-artifact@v4
