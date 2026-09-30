@@ -591,6 +591,39 @@ class SupabaseRestClient:
             )
         return raw
 
+    def select_rows(
+        self,
+        table: str,
+        *,
+        query: dict[str, str],
+    ) -> list[dict[str, Any]]:
+        raw = self._request(
+            "GET",
+            f"/rest/v1/{table}",
+            query=query,
+        )
+        parsed = json.loads(raw.decode("utf-8") or "[]")
+        if not isinstance(parsed, list):
+            raise RuntimeError(
+                f"Supabase select from {table} did not return a list"
+            )
+        return [dict(row) for row in parsed]
+
+    def patch_rows(
+        self,
+        table: str,
+        *,
+        query: dict[str, str],
+        payload: dict[str, Any],
+    ) -> None:
+        self._request(
+            "PATCH",
+            f"/rest/v1/{table}",
+            query=query,
+            payload=payload,
+            prefer="return=minimal",
+        )
+
     def upsert_rows(
         self,
         table: str,
