@@ -274,7 +274,7 @@ class Stage10A1BRealBackfillTests(unittest.TestCase):
         options = seen["payload"]["params"][1]
         self.assertEqual(
             options["maxSupportedTransactionVersion"],
-            0,
+            1,
         )
 
     def test_indexed_gtfa_collects_complete_history_and_redacts_secret(self):
