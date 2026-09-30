@@ -125,9 +125,78 @@ jobs:
         env:
           HISTORY_AS_OF_UNIX: ${{ needs.prepare.outputs.history_as_of_unix }}
           SHARD_INDEX: ${{ matrix.shard }}
+          INDEXED_RPC_CONFIGURED: ${{ needs.prepare.outputs.indexed_rpc_configured }}
+          HELIUS_CONFIGURED: ${{ needs.prepare.outputs.helius_configured }}
         run: |
           SHARD_DIR="/tmp/stage10a1b/shard-$SHARD_INDEX"
           mkdir -p "$SHARD_DIR"
+
+          if [ "$INDEXED_RPC_CONFIGURED" = "true" ] || [ "$HELIUS_CONFIGURED" = "true" ]; then
+            python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from research.wallet_s10a1_candidate_refinement import (
+              wallet_addresses_from_refinement,
+          )
+          from research.wallet_s10a1b_real_historical_backfill import (
+              build_refinement_shard,
+          )
+
+          shard_index = int(os.environ["SHARD_INDEX"])
+          refinement = json.loads(
+              Path("/tmp/input/stage10a1a.json").read_text()
+          )["refinement"]
+          shard = build_refinement_shard(
+              refinement,
+              shard_index=shard_index,
+              shard_count=8,
+          )
+          wallets = wallet_addresses_from_refinement(
+              shard,
+              trader_only=True,
+          )
+          root = Path(f"/tmp/stage10a1b/shard-{shard_index}")
+          plan = {
+              "provider": "indexed_provider_direct",
+              "source_label": "indexed-provider",
+              "source_origin": None,
+              "history_as_of_unix": int(
+                  os.environ["HISTORY_AS_OF_UNIX"]
+              ),
+              "wallet_count": len(wallets),
+              "standard_wallet_count": 0,
+              "high_volume_wallet_count": len(wallets),
+              "standard_wallets": [],
+              "high_volume_wallets": wallets,
+              "policy": {
+                  "quality_filter": None,
+                  "high_volume_is_unqualified": False,
+                  "high_volume_action": "DIRECT_INDEXED_PROVIDER",
+              },
+          }
+          (root / "capacity-plan.json").write_text(
+              json.dumps(plan, indent=2, sort_keys=True) + "\n"
+          )
+          (root / "high-volume-refinement.json").write_text(
+              json.dumps(
+                  {"refinement": shard},
+                  indent=2,
+                  sort_keys=True,
+              ) + "\n"
+          )
+          print(json.dumps({
+              "shard_index": shard_index,
+              "wallet_count": len(wallets),
+              "standard_wallet_count": 0,
+              "high_volume_wallet_count": len(wallets),
+              "routing": "DIRECT_INDEXED_PROVIDER",
+          }, indent=2))
+          PY
+            exit 0
+          fi
+
           python - <<'PY'
           import json
           import os
