@@ -91,8 +91,9 @@ def _fetch_indexed_gtfa_page(
     limit: int,
     pagination_token: str | None,
     *,
-    attempts: int = DEFAULT_RPC_ATTEMPTS,
+    attempts: int = 8,
     transport: RpcTransport | None = None,
+    request_delay_seconds: float = 0.0,
 ) -> dict[str, Any]:
     """Fetch one provider-neutral getTransactionsForAddress page.
 
@@ -103,6 +104,8 @@ def _fetch_indexed_gtfa_page(
     _safe_indexed_origin(endpoint)
     if int(attempts) < 1:
         raise ValueError("attempts must be >= 1")
+    if float(request_delay_seconds) < 0:
+        raise ValueError("request_delay_seconds must be >= 0")
 
     payload = build_helius_gtfa_payload(
         wallet,
@@ -120,6 +123,8 @@ def _fetch_indexed_gtfa_page(
 
     for attempt in range(int(attempts)):
         try:
+            if float(request_delay_seconds) > 0:
+                time.sleep(float(request_delay_seconds))
             status, raw = sender(
                 "POST",
                 endpoint,
@@ -162,7 +167,7 @@ def _fetch_indexed_gtfa_page(
             last_error = exc
             if attempt == int(attempts) - 1:
                 break
-            time.sleep(min(2 ** attempt, 8))
+            time.sleep(min(2 ** attempt, 64))
 
     raise RuntimeError(
         "indexed getTransactionsForAddress failed after "
@@ -947,6 +952,7 @@ def collect_indexed_histories_as_of(
     as_of_unix: int,
     page_limit: int = 100,
     max_pages_per_wallet: int = 1000,
+    min_request_interval_seconds: float = 0.0,
     fetch_page: Callable[
         [str, str, int, str | None],
         dict[str, Any],
@@ -973,6 +979,7 @@ def collect_indexed_histories_as_of(
                 wallet,
                 limit,
                 pagination_token,
+                request_delay_seconds=min_request_interval_seconds,
             )
     else:
         provider_fetch_page = fetch_page
@@ -1387,6 +1394,20 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--indexed-min-request-interval-ms",
+        type=float,
+        default=float(
+            os.environ.get(
+                "INDEXED_SOLANA_MIN_REQUEST_INTERVAL_MS",
+                "0",
+            )
+        ),
+        help=(
+            "Minimum delay before each indexed history request. "
+            "Use this to remain below provider CU/s limits."
+        ),
+    )
+    parser.add_argument(
         "--signature-page-limit",
         type=int,
         default=DEFAULT_SIGNATURE_PAGE_LIMIT,
@@ -1503,6 +1524,9 @@ def main() -> int:
             wallets,
             as_of_unix=args.history_as_of_unix,
             max_pages_per_wallet=args.indexed_max_pages_per_wallet,
+            min_request_interval_seconds=(
+                float(args.indexed_min_request_interval_ms) / 1000.0
+            ),
         )
         raw_source = "indexed_gtfa"
 
