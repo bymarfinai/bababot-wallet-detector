@@ -8,9 +8,13 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Iterable
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
-from research.wallet_s1_data_foundation import validate_solana_address
+from research.wallet_s1_data_foundation import (
+    build_helius_gtfa_payload,
+    validate_solana_address,
+)
 from research.wallet_s10a0_wallet_universe_discovery import (
     DEFAULT_MAX_SUPPORTED_TRANSACTION_VERSION,
     DEFAULT_SOLANA_RPC_URL,
@@ -69,6 +73,98 @@ def _default_transport(
     )
     with urlopen(request, timeout=60) as response:
         return int(response.status), response.read()
+
+
+def _safe_indexed_origin(url: str) -> str:
+    """Return a credential-free provider origin for provenance/reporting."""
+    parts = urlsplit(str(url or "").strip())
+    if parts.scheme not in {"http", "https"} or not parts.netloc:
+        raise ValueError(
+            "indexed RPC URL must be an absolute HTTP(S) URL"
+        )
+    return urlunsplit((parts.scheme, parts.netloc, "/", "", ""))
+
+
+def _fetch_indexed_gtfa_page(
+    endpoint: str,
+    wallet: str,
+    limit: int,
+    pagination_token: str | None,
+    *,
+    attempts: int = DEFAULT_RPC_ATTEMPTS,
+    transport: RpcTransport | None = None,
+) -> dict[str, Any]:
+    """Fetch one provider-neutral getTransactionsForAddress page.
+
+    Helius, Alchemy, QuickNode, or any compatible indexed Solana RPC may
+    supply the endpoint. Credentials may live in the URL; they are never
+    copied into reports or evidence.
+    """
+    _safe_indexed_origin(endpoint)
+    if int(attempts) < 1:
+        raise ValueError("attempts must be >= 1")
+
+    payload = build_helius_gtfa_payload(
+        wallet,
+        limit=int(limit),
+        pagination_token=pagination_token,
+        sort_order="desc",
+    )
+    body = json.dumps(payload).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    sender = transport or _default_transport
+    last_error: Exception | None = None
+
+    for attempt in range(int(attempts)):
+        try:
+            status, raw = sender(
+                "POST",
+                endpoint,
+                headers,
+                body,
+            )
+            if not 200 <= int(status) < 300:
+                raise RuntimeError(
+                    f"indexed RPC HTTP status {status}: "
+                    f"{raw.decode('utf-8', errors='replace')}"
+                )
+            parsed = json.loads(raw.decode("utf-8"))
+            if not isinstance(parsed, dict):
+                raise TypeError(
+                    "indexed RPC response must be an object"
+                )
+            if parsed.get("error") is not None:
+                raise RuntimeError(
+                    f"indexed RPC error: {parsed['error']}"
+                )
+            result = parsed.get("result")
+            if result is None:
+                raise RuntimeError(
+                    "indexed getTransactionsForAddress returned null"
+                )
+            if not isinstance(result, dict):
+                raise TypeError(
+                    "indexed getTransactionsForAddress result "
+                    "must be an object"
+                )
+            return parsed
+        except (
+            HTTPError,
+            URLError,
+            TimeoutError,
+            RuntimeError,
+            TypeError,
+            json.JSONDecodeError,
+        ) as exc:
+            last_error = exc
+            if attempt == int(attempts) - 1:
+                break
+            time.sleep(min(2 ** attempt, 8))
+
+    raise RuntimeError(
+        "indexed getTransactionsForAddress failed after "
+        f"{attempts} attempts: {last_error}"
+    )
 
 
 class SolanaWalletHistoryRpc:
@@ -840,6 +936,79 @@ def collect_helius_histories_as_of(
     }
 
 
+def collect_indexed_histories_as_of(
+    endpoint: str,
+    source_label: str,
+    wallets: Iterable[str],
+    *,
+    as_of_unix: int,
+    page_limit: int = 100,
+    max_pages_per_wallet: int = 1000,
+    fetch_page: Callable[
+        [str, str, int, str | None],
+        dict[str, Any],
+    ] | None = None,
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any]]:
+    """Collect complete gTFA history from a compatible indexed provider."""
+    endpoint = str(endpoint or "").strip()
+    source_label = str(source_label or "").strip()
+    if not endpoint:
+        raise ValueError("indexed RPC endpoint is required")
+    if not source_label:
+        raise ValueError("indexed RPC source label is required")
+    public_origin = _safe_indexed_origin(endpoint)
+
+    if fetch_page is None:
+        def provider_fetch_page(
+            _credential: str,
+            wallet: str,
+            limit: int,
+            pagination_token: str | None,
+        ) -> dict[str, Any]:
+            return _fetch_indexed_gtfa_page(
+                endpoint,
+                wallet,
+                limit,
+                pagination_token,
+            )
+    else:
+        provider_fetch_page = fetch_page
+
+    raw, report = collect_real_histories(
+        "indexed-rpc",
+        wallets,
+        page_limit=page_limit,
+        max_pages_per_wallet=max_pages_per_wallet,
+        fetch_page=provider_fetch_page,
+    )
+
+    filtered: dict[str, list[dict[str, Any]]] = {}
+    excluded_future = 0
+    for wallet, rows in sorted(raw.items()):
+        kept: list[dict[str, Any]] = []
+        for tx in rows:
+            block_time = tx.get("blockTime")
+            if block_time is None:
+                continue
+            if int(block_time) <= int(as_of_unix):
+                kept.append(dict(tx))
+            else:
+                excluded_future += 1
+        filtered[wallet] = kept
+
+    return filtered, {
+        **report,
+        "provider": "indexed_gtfa",
+        "source_label": source_label,
+        "source_origin": public_origin,
+        "history_as_of_unix": int(as_of_unix),
+        "excluded_post_as_of_transaction_count": excluded_future,
+        "qualification_grade": bool(
+            report.get("history_complete_for_all_wallets")
+        ),
+    }
+
+
 def _load_refinement(path: str | Path) -> dict[str, Any]:
     parsed = json.loads(Path(path).read_text(encoding="utf-8"))
     refinement = (
@@ -1156,7 +1325,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--provider",
-        choices=["solana-rpc", "helius"],
+        choices=["solana-rpc", "helius", "indexed-rpc"],
         default="solana-rpc",
     )
     parser.add_argument(
@@ -1179,6 +1348,25 @@ def main() -> int:
         default=os.environ.get(
             "SOLANA_RPC_SOURCE_LABEL",
             "solana-json-rpc",
+        ),
+    )
+    parser.add_argument(
+        "--indexed-rpc-url",
+        default=(
+            os.environ.get("INDEXED_SOLANA_RPC_URL")
+            or os.environ.get("ALCHEMY_SOLANA_RPC_URL")
+            or ""
+        ),
+        help=(
+            "Full credential-bearing URL for a compatible indexed "
+            "getTransactionsForAddress provider. Never written to output."
+        ),
+    )
+    parser.add_argument(
+        "--indexed-source-label",
+        default=os.environ.get(
+            "INDEXED_SOLANA_RPC_SOURCE_LABEL",
+            "indexed-solana-gtfa",
         ),
     )
     parser.add_argument(
@@ -1273,7 +1461,7 @@ def main() -> int:
             ),
         )
         raw_source = "solana_json_rpc"
-    else:
+    elif args.provider == "helius":
         api_key = os.environ.get("HELIUS_API_KEY")
         if not api_key:
             raise SystemExit(
@@ -1285,6 +1473,20 @@ def main() -> int:
             as_of_unix=args.history_as_of_unix,
         )
         raw_source = "helius_gtfa"
+    else:
+        indexed_rpc_url = str(args.indexed_rpc_url or "").strip()
+        if not indexed_rpc_url:
+            raise SystemExit(
+                "INDEXED_SOLANA_RPC_URL or ALCHEMY_SOLANA_RPC_URL "
+                "is required when --provider indexed-rpc"
+            )
+        raw_by_wallet, fetch_report = collect_indexed_histories_as_of(
+            indexed_rpc_url,
+            args.indexed_source_label,
+            wallets,
+            as_of_unix=args.history_as_of_unix,
+        )
+        raw_source = "indexed_gtfa"
 
     replay = None
     if args.evidence_only:
