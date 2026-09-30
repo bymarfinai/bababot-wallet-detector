@@ -110,6 +110,9 @@ def _fetch_indexed_gtfa_page(
         pagination_token=pagination_token,
         sort_order="desc",
     )
+    # Versioned Solana transactions require the client to opt in.
+    # Alchemy returns -32015 when this field is omitted.
+    payload["params"][1]["maxSupportedTransactionVersion"] = 0
     body = json.dumps(payload).encode("utf-8")
     headers = {"Content-Type": "application/json"}
     sender = transport or _default_transport
