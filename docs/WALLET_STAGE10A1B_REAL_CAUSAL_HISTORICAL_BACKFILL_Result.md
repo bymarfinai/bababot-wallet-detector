@@ -1,7 +1,7 @@
 # BabaBot Wallet Detector — Stage 10A-1B Real Causal Historical Backfill
 
 **Date:** 2026-09-29  
-**Status:** PASS_STANDARD_LANE / PARTIAL_REAL_POPULATION
+**Status:** PARTIAL_REAL_POPULATION / 37_OF_181_QUALIFICATION_GRADE
 
 ## Result
 
@@ -172,3 +172,88 @@ then
 
 10A-1C     Stage 3–5 real qualification
 ```
+
+
+## 2026-09-30 evidence audit
+
+The repository status file previously stopped at population run `36511958904`. A newer successful Wallet History Population run exists and was audited directly:
+
+```text
+GitHub Actions run = 36523741526
+run number         = 8
+head SHA           = c3b34a092a87a3b8c260cfb2121f4badd9002c81
+conclusion         = success
+
+activity candidates = 207
+trader candidates   = 181
+meme-buy candidates = 123
+
+STANDARD wallets    = 26
+HIGH_VOLUME wallets = 155
+```
+
+The HIGH_VOLUME deep-capacity lane further partitioned the 155 wallets as:
+
+```text
+public-RPC <=500-signature lane = 11
+indexed-provider lane           = 144
+```
+
+Artifact-level verification confirmed that every completed wallet is genuinely qualification-grade:
+
+```text
+STANDARD qualification-grade wallets = 26
+HIGH_VOLUME/public-RPC q-grade        = 11
+------------------------------------------------
+qualification-grade history complete  = 37 / 181
+remaining indexed-provider wallets    = 144
+```
+
+Evidence volume already collected:
+
+```text
+STANDARD raw rows              = 327
+STANDARD normalized rows       = 327
+
+HIGH_VOLUME public-RPC raw     = 4,026
+HIGH_VOLUME public-RPC norm    = 4,026
+```
+
+All completed result artifacts reported `qualification_grade=true`.
+
+However, every audited result also reported `dry_run=true`. The run capability check showed:
+
+```text
+HELIUS_API_KEY configured             = no
+WALLET_SUPABASE_SECRET_KEY configured = no
+```
+
+Therefore Stage 10A-1B is **not formally complete** yet:
+
+```text
+full historical coverage = 37 / 181
+Supabase persisted cohort = 0 / 181 from this run
+formal Stage 10A-1B       = BLOCKED
+```
+
+The workflow's successful conclusion means its bounded lanes and partition checks completed successfully; it must not be interpreted as full Stage-10A-1B acceptance.
+
+### Remaining acceptance work
+
+```text
+144 indexed-provider wallets
+        ↓
+qualification-grade complete history
+        ↓
+181 / 181 historical coverage
+        ↓
+server-side Supabase persistence
+        ↓
+181 / 181 persisted evidence
+        ↓
+formal Stage 10A-1B PASS
+        ↓
+Stage 10A-1C
+```
+
+No Stage 3–5 real qualification should run before this gate is satisfied.
