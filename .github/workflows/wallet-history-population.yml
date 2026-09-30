@@ -28,6 +28,7 @@ jobs:
         env:
           HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
           ALCHEMY_SOLANA_RPC_URL: ${{ secrets.ALCHEMY_SOLANA_RPC_URL }}
+          # Server-only write credential; never print or expose its value.
           WALLET_SUPABASE_SECRET_KEY: ${{ secrets.WALLET_SUPABASE_SECRET_KEY }}
         run: |
           if [ -n "$HELIUS_API_KEY" ]; then
