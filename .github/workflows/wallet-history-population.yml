@@ -60,7 +60,7 @@ jobs:
             --out /tmp/stage10a0.json
       - name: Refine to trader candidates
         env:
-          WALLET_SUPABASE_URL: https://yuqkodwdqaggsexbqiqa.supabase.co
+          WALLET_SUPABASE_URL: https://jugdfgthixlisfjmlzru.supabase.co
           WALLET_SUPABASE_SECRET_KEY: ${{ secrets.WALLET_SUPABASE_SECRET_KEY }}
         run: |
           PERSIST_ARGS=""
@@ -288,7 +288,7 @@ jobs:
           PY
       - name: Backfill STANDARD wallets in shard
         env:
-          WALLET_SUPABASE_URL: https://yuqkodwdqaggsexbqiqa.supabase.co
+          WALLET_SUPABASE_URL: https://jugdfgthixlisfjmlzru.supabase.co
           WALLET_SUPABASE_SECRET_KEY: ${{ secrets.WALLET_SUPABASE_SECRET_KEY }}
           HISTORY_AS_OF_UNIX: ${{ needs.prepare.outputs.history_as_of_unix }}
           SHARD_INDEX: ${{ matrix.shard }}
@@ -515,7 +515,7 @@ jobs:
           PY
       - name: Backfill HIGH_VOLUME public-RPC eligible wallets
         env:
-          WALLET_SUPABASE_URL: https://yuqkodwdqaggsexbqiqa.supabase.co
+          WALLET_SUPABASE_URL: https://jugdfgthixlisfjmlzru.supabase.co
           WALLET_SUPABASE_SECRET_KEY: ${{ secrets.WALLET_SUPABASE_SECRET_KEY }}
           HISTORY_AS_OF_UNIX: ${{ needs.prepare.outputs.history_as_of_unix }}
           SHARD_INDEX: ${{ matrix.shard }}
@@ -571,7 +571,7 @@ jobs:
         env:
           ALCHEMY_SOLANA_RPC_URL: ${{ secrets.ALCHEMY_SOLANA_RPC_URL }}
           HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
-          WALLET_SUPABASE_URL: https://yuqkodwdqaggsexbqiqa.supabase.co
+          WALLET_SUPABASE_URL: https://jugdfgthixlisfjmlzru.supabase.co
           WALLET_SUPABASE_SECRET_KEY: ${{ secrets.WALLET_SUPABASE_SECRET_KEY }}
           HISTORY_AS_OF_UNIX: ${{ needs.prepare.outputs.history_as_of_unix }}
           SHARD_INDEX: ${{ matrix.shard }}
