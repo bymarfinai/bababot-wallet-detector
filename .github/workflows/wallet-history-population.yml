@@ -328,7 +328,7 @@ jobs:
 
   high_volume:
     needs: [prepare, backfill]
-    if: always()
+    if: ${{ always() && needs.prepare.result == 'success' && needs.backfill.result != 'cancelled' }}
     strategy:
       fail-fast: false
       max-parallel: 2
@@ -662,7 +662,7 @@ jobs:
 
   summarize:
     needs: [prepare, backfill, high_volume]
-    if: always()
+    if: ${{ always() && needs.prepare.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Download all shard artifacts
