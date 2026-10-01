@@ -583,7 +583,7 @@ jobs:
           fi
 
           if [ -n "$ALCHEMY_SOLANA_RPC_URL" ]; then
-            python -m research.wallet_s10a1b_resumable_indexed_backfill \
+            python -m research.wallet_s10a1b_streaming_backfill \
               --refinement-file "$OUT/indexed-provider-refinement.json" \
               --indexed-rpc-url "$ALCHEMY_SOLANA_RPC_URL" \
               --indexed-source-label alchemy-solana-gtfa \
@@ -592,12 +592,14 @@ jobs:
               --indexed-min-request-interval-ms 1000 \
               --out "$OUT/indexed-result.json"
           elif [ -n "$HELIUS_API_KEY" ]; then
-            python -m research.wallet_s10a1b_real_historical_backfill \
+            HELIUS_INDEXED_RPC_URL="https://mainnet.helius-rpc.com/?api-key=$HELIUS_API_KEY"
+            python -m research.wallet_s10a1b_streaming_backfill \
               --refinement-file "$OUT/indexed-provider-refinement.json" \
-              --provider helius \
+              --indexed-rpc-url "$HELIUS_INDEXED_RPC_URL" \
+              --indexed-source-label helius-solana-gtfa \
               --history-as-of-unix "$HISTORY_AS_OF_UNIX" \
-              --evidence-only \
-              --evidence-dir "$OUT/indexed-evidence" \
+              --max-pages-per-wallet 5000 \
+              --indexed-min-request-interval-ms 1000 \
               --out "$OUT/indexed-result.json"
           else
             echo "No indexed history provider credential available"
@@ -637,6 +639,12 @@ jobs:
           )
           summary["skipped_complete_wallet_count"] = int(
               persistence.get("skipped_complete_wallet_count") or 0
+          )
+          summary["streaming_compact_v2"] = bool(
+              persistence.get("streaming_compact_v2")
+          )
+          summary["compact_trade_rows_persisted_this_run"] = int(
+              persistence.get("compact_trade_rows_persisted_this_run") or 0
           )
           (root / "high-volume-summary.json").write_text(
               json.dumps(summary, indent=2, sort_keys=True) + "\n"
