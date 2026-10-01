@@ -96,6 +96,7 @@ def _fetch_indexed_gtfa_page(
     request_delay_seconds: float = 0.0,
     history_as_of_unix: int | None = None,
     resume_before_signature: str | None = None,
+    sort_order: str = "desc",
 ) -> dict[str, Any]:
     """Fetch one provider-neutral getTransactionsForAddress page.
 
@@ -113,7 +114,7 @@ def _fetch_indexed_gtfa_page(
         wallet,
         limit=int(limit),
         pagination_token=pagination_token,
-        sort_order="desc",
+        sort_order=str(sort_order),
     )
     # Versioned Solana transactions require the client to opt in.
     # Alchemy returns -32015 when this field is omitted.
