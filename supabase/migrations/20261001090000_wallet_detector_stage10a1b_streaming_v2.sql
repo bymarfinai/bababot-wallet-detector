@@ -1,11 +1,7 @@
 -- Stage 10A-1B V2: streaming historical scanner.
--- Raw and normalized transaction payloads are no longer durable evidence.
--- The scanner keeps only compact resume state, closed-trade summaries,
+-- Fresh V2 schema: raw and normalized transaction payloads are never durable
+-- evidence. The scanner keeps only compact resume state, closed-trade summaries,
 -- and the final Stage-4/5 profile.
-
-truncate table
-  public.normalized_wallet_history,
-  public.historical_wallet_transactions;
 
 create table if not exists public.wallet_history_scan_state (
   universe_fingerprint text not null,
