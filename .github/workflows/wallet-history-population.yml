@@ -52,6 +52,24 @@ jobs:
             echo "supabase_write_configured=false" >> "$GITHUB_OUTPUT"
             echo "Supabase server write credential configured: no"
           fi
+      - name: Validate Supabase server credential
+        if: steps.capabilities.outputs.supabase_write_configured == 'true'
+        env:
+          WALLET_SUPABASE_URL: https://jugdfgthixlisfjmlzru.supabase.co
+          WALLET_SUPABASE_SECRET_KEY: ${{ secrets.WALLET_SUPABASE_SECRET_KEY }}
+        run: |
+          python - <<'PY'
+          import os
+          from research.wallet_supabase_adapter import SupabaseRestClient
+
+          client = SupabaseRestClient.from_env()
+          client.select_rows(
+              "wallet_history_scan_state",
+              query={"select": "wallet", "limit": "1"},
+          )
+          print("Supabase server credential valid")
+          PY
+
       - name: Discover live candidate universe
         run: |
           python -m research.wallet_s10a0_wallet_universe_discovery \
