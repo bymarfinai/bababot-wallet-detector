@@ -74,7 +74,7 @@ No consumer is required for Wallet Detector itself to work.
 | 9 | PASS | Smart-money signal output layer |
 | 10A-0 | PASS | Automatic wallet universe discovery from real Solana activity; real mainnet smoke PASS |
 | 10A-1A | PASS | Stage-2 trader/meme candidate refinement before full backfill |
-| 10A-1B | V2 IMPLEMENTED / NEW DB READY / GITHUB SECRET PENDING | Streaming oldest→newest historical scan; raw/normalized tx are transient, compact trade/state persistence only |
+| 10A-1B | V2 RUNNING / RESUME HARDENED | Streaming oldest→newest historical scan; compact persistence; 16-way sharding + frozen-run resume protects long high-volume scans |
 | 10A-1C | BLOCKED | Formal cohort-wide Stage 3–5 qualification/registry waits for completed 10A-1B V2 population |
 | 10B | PENDING | Real token OHLC ingestion |
 | 10C | PENDING | Real empirical A/B/C/D/E replay |
@@ -653,6 +653,18 @@ docs/WALLET_STAGE10A1A_CANDIDATE_REFINEMENT_Status.txt
 ```
 
 ### Stage 10A-1B — Real causal historical backfill
+
+Current recovery-safe execution policy:
+- population runs are manual-only (`workflow_dispatch`) to avoid accidental expensive scans on workflow edits;
+- normal population uses 16 shards;
+- HIGH_VOLUME jobs keep `max-parallel: 2` and use a 360-minute timeout;
+- a prior frozen cohort can be resumed with `resume_run_id` + its exact `history_as_of_unix`;
+- completed wallets are skipped through Stage 10A-1B V2 checkpoint state.
+
+Current frozen resume target after the 4-hour timeout incident:
+- source run: `36809643068`
+- history cutoff: `1790824795`
+
 
 **PARTIAL PASS — STANDARD lane validated on real mainnet data.**
 
