@@ -74,8 +74,8 @@ No consumer is required for Wallet Detector itself to work.
 | 9 | PASS | Smart-money signal output layer |
 | 10A-0 | PASS | Automatic wallet universe discovery from real Solana activity; real mainnet smoke PASS |
 | 10A-1A | PASS | Stage-2 trader/meme candidate refinement before full backfill |
-| 10A-1B | PARTIAL PASS | Real causal backfill: STANDARD lane PASS; HIGH_VOLUME + Supabase persistence pending |
-| 10A-1C | BLOCKED | Stage 3–5 qualification waits for qualification-grade 10A-1B population |
+| 10A-1B | V2 IMPLEMENTED / DB RECOVERY PENDING | Streaming oldest→newest historical scan; raw/normalized tx are transient, compact trade/state persistence only |
+| 10A-1C | BLOCKED | Formal cohort-wide Stage 3–5 qualification/registry waits for completed 10A-1B V2 population |
 | 10B | PENDING | Real token OHLC ingestion |
 | 10C | PENDING | Real empirical A/B/C/D/E replay |
 | 11 | PLANNED | Validation + rule optimization + S4/S5 calibration |
