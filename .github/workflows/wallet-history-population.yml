@@ -2,17 +2,22 @@ name: Wallet History Population
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/wallet-history-population.yml"
+    inputs:
+      resume_run_id:
+        description: "Prior Wallet History Population run ID whose frozen cohort should be resumed"
+        required: false
+        type: string
+      history_as_of_unix:
+        description: "Frozen history cutoff from the prior run; required when resume_run_id is set"
+        required: false
+        type: string
 
 jobs:
   prepare:
     runs-on: ubuntu-latest
     outputs:
-      history_as_of_unix: ${{ steps.freeze.outputs.history_as_of_unix }}
-      trader_wallet_count: ${{ steps.freeze.outputs.trader_wallet_count }}
+      history_as_of_unix: ${{ steps.resume.outputs.history_as_of_unix || steps.freeze.outputs.history_as_of_unix }}
+      trader_wallet_count: ${{ steps.resume.outputs.trader_wallet_count || steps.freeze.outputs.trader_wallet_count }}
       helius_configured: ${{ steps.capabilities.outputs.helius_configured }}
       indexed_rpc_configured: ${{ steps.capabilities.outputs.indexed_rpc_configured }}
       supabase_write_configured: ${{ steps.capabilities.outputs.supabase_write_configured }}
@@ -70,13 +75,58 @@ jobs:
           print("Supabase server credential valid")
           PY
 
+      - name: Download frozen refinement for resume
+        if: ${{ inputs.resume_run_id != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: stage10a1b-frozen-refinement
+          path: /tmp
+          run-id: ${{ inputs.resume_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Load frozen resume metadata
+        id: resume
+        if: ${{ inputs.resume_run_id != '' }}
+        env:
+          HISTORY_AS_OF_UNIX: ${{ inputs.history_as_of_unix }}
+        run: |
+          if [ -z "$HISTORY_AS_OF_UNIX" ]; then
+            echo "history_as_of_unix is required when resume_run_id is set" >&2
+            exit 1
+          fi
+          echo "history_as_of_unix=$HISTORY_AS_OF_UNIX" >> "$GITHUB_OUTPUT"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          refinement = json.loads(
+              Path("/tmp/stage10a1a.json").read_text()
+          )["refinement"]
+          trader_count = int(
+              refinement["trader_candidate_wallet_count"]
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"trader_wallet_count={trader_count}\n")
+          print(json.dumps({
+              "resume_run_id": "${{ inputs.resume_run_id }}",
+              "history_as_of_unix": int(os.environ["HISTORY_AS_OF_UNIX"]),
+              "refinement_fingerprint": refinement[
+                  "refinement_fingerprint"
+              ],
+              "trader_candidate_wallet_count": trader_count,
+          }, indent=2))
+          PY
+
       - name: Discover live candidate universe
+        if: ${{ inputs.resume_run_id == '' }}
         run: |
           python -m research.wallet_s10a0_wallet_universe_discovery \
             --lookback-slots 2 \
             --require-candidates \
             --out /tmp/stage10a0.json
       - name: Refine to trader candidates
+        if: ${{ inputs.resume_run_id == '' }}
         env:
           WALLET_SUPABASE_URL: https://jugdfgthixlisfjmlzru.supabase.co
           WALLET_SUPABASE_SECRET_KEY: ${{ secrets.WALLET_SUPABASE_SECRET_KEY }}
@@ -92,6 +142,7 @@ jobs:
             --out /tmp/stage10a1a.json
       - name: Freeze population timestamp
         id: freeze
+        if: ${{ inputs.resume_run_id == '' }}
         run: |
           HISTORY_AS_OF=$(date +%s)
           echo "history_as_of_unix=$HISTORY_AS_OF" >> "$GITHUB_OUTPUT"
@@ -132,7 +183,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -177,7 +228,7 @@ jobs:
           shard = build_refinement_shard(
               refinement,
               shard_index=shard_index,
-              shard_count=8,
+              shard_count=16,
           )
           wallets = wallet_addresses_from_refinement(
               shard,
@@ -245,7 +296,7 @@ jobs:
           shard = build_refinement_shard(
               refinement,
               shard_index=shard_index,
-              shard_count=8,
+              shard_count=16,
           )
           wallets = wallet_addresses_from_refinement(
               shard,
@@ -351,9 +402,9 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
     runs-on: ubuntu-latest
-    timeout-minutes: 240
+    timeout-minutes: 360
     steps:
       - name: Checkout
         uses: actions/checkout@v5
