@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from decimal import Decimal
 from typing import Any, Callable, Iterable
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -572,24 +574,58 @@ class SupabaseRestClient:
         query: dict[str, str] | None = None,
         payload: Any = None,
         prefer: str | None = None,
+        attempts: int = 6,
     ) -> bytes:
+        if int(attempts) < 1:
+            raise ValueError("attempts must be >= 1")
         suffix = ""
         if query:
             suffix = "?" + urlencode(query, safe=",.*()")
         url = f"{self.url}{path}{suffix}"
         body = None if payload is None else _json_bytes(payload)
-        status, raw = self.transport(
-            method,
-            url,
-            self._headers(prefer=prefer),
-            body,
-        )
-        if not 200 <= int(status) < 300:
+
+        retryable_statuses = {429, 500, 502, 503, 504}
+        last_error: Exception | None = None
+        for attempt in range(int(attempts)):
+            try:
+                status, raw = self.transport(
+                    method,
+                    url,
+                    self._headers(prefer=prefer),
+                    body,
+                )
+            except HTTPError as exc:
+                status = int(exc.code)
+                raw = exc.read()
+                last_error = exc
+            except (URLError, TimeoutError) as exc:
+                last_error = exc
+                if attempt == int(attempts) - 1:
+                    raise RuntimeError(
+                        f"Supabase request failed after {attempts} attempts: "
+                        f"{exc}"
+                    ) from exc
+                time.sleep(min(2 ** attempt, 32))
+                continue
+
+            if 200 <= int(status) < 300:
+                return raw
+
             detail = raw.decode("utf-8", errors="replace")
+            if (
+                int(status) in retryable_statuses
+                and attempt < int(attempts) - 1
+            ):
+                time.sleep(min(2 ** attempt, 32))
+                continue
             raise RuntimeError(
                 f"Supabase request failed {status}: {detail}"
-            )
-        return raw
+            ) from last_error
+
+        raise RuntimeError(
+            f"Supabase request failed after {attempts} attempts: "
+            f"{last_error}"
+        )
 
     def select_rows(
         self,
@@ -608,6 +644,28 @@ class SupabaseRestClient:
                 f"Supabase select from {table} did not return a list"
             )
         return [dict(row) for row in parsed]
+
+    def select_all_rows(
+        self,
+        table: str,
+        *,
+        query: dict[str, str],
+        page_size: int = 1000,
+    ) -> list[dict[str, Any]]:
+        if int(page_size) < 1:
+            raise ValueError("page_size must be >= 1")
+        rows: list[dict[str, Any]] = []
+        offset = 0
+        while True:
+            page_query = dict(query)
+            page_query["limit"] = str(int(page_size))
+            page_query["offset"] = str(offset)
+            page = self.select_rows(table, query=page_query)
+            rows.extend(page)
+            if len(page) < int(page_size):
+                break
+            offset += len(page)
+        return rows
 
     def patch_rows(
         self,
