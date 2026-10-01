@@ -1071,7 +1071,7 @@ Optional Supabase persistence: add --persist-supabase.
 Server-side environment:
 
 ```text
-WALLET_SUPABASE_URL=https://yuqkodwdqaggsexbqiqa.supabase.co
+WALLET_SUPABASE_URL=https://jugdfgthixlisfjmlzru.supabase.co
 WALLET_SUPABASE_SECRET_KEY=<server secret>
 HELIUS_API_KEY=<helius key>
 ```
